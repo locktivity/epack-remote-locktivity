@@ -21,16 +21,6 @@ func silenceTestLogs(t *testing.T) {
 	})
 }
 
-// mockOAuth is a simple OAuth mock for testing.
-type mockOAuth struct {
-	token string
-	err   error
-}
-
-func (m *mockOAuth) GetToken() (string, error) {
-	return m.token, m.err
-}
-
 func TestPushPrepare(t *testing.T) {
 	mockClient := locktivity.NewMockClient()
 	keychain := auth.NewMemoryKeychain()

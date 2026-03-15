@@ -884,21 +884,6 @@ type resultOutput struct {
 	Bytes     int64  `json:"bytes"`
 }
 
-// readResultJSON reads and parses a result.json file.
-func readResultJSON(path string) (*resultJSON, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var result resultJSON
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-}
-
 // computeMD5Checksum computes the base64-encoded MD5 checksum of a file.
 // This is the format required by S3's Content-MD5 header.
 func computeMD5Checksum(path string) (string, error) {

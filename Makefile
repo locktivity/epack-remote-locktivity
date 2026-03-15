@@ -23,9 +23,15 @@ test-cover:
 	go test -v -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 
-# Run linter
-lint:
-	golangci-lint run ./...
+# Lint code (downloads golangci-lint binary to match CI)
+GOLANGCI_LINT_VERSION := v2.9.0
+GOLANGCI_LINT := ./bin/golangci-lint
+
+$(GOLANGCI_LINT):
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b ./bin $(GOLANGCI_LINT_VERSION)
+
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run ./...
 
 # Clean build artifacts
 clean:
