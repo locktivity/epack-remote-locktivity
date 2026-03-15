@@ -1,0 +1,13 @@
+version: 1
+env:
+  - CGO_ENABLED=0
+flags:
+  - -trimpath
+ldflags:
+  - "-s"
+  - "-w"
+  - "-X main.version={{ .Env.VERSION }}"
+goos: darwin
+goarch: amd64
+main: ./cmd/epack-remote-locktivity
+binary: epack-remote-locktivity-darwin-amd64
