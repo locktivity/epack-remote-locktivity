@@ -29,6 +29,13 @@ type Keychain interface {
 	// SetTokenExpiry stores access token expiry as Unix time.
 	SetTokenExpiry(unix int64) error
 
+	// GetClientID retrieves the client_id that was used to obtain the stored token.
+	// Returns empty string if no client_id was stored (e.g., device code flow).
+	GetClientID() (string, error)
+
+	// SetClientID stores the client_id associated with the stored token.
+	SetClientID(clientID string) error
+
 	// Clear removes all stored tokens.
 	Clear() error
 }
@@ -117,12 +124,28 @@ func (k *OSKeychain) SetTokenExpiry(unix int64) error {
 	return keyring.Set(k.service, k.keyName("access_token_expiry"), fmt.Sprintf("%d", unix))
 }
 
+// GetClientID retrieves the client_id that was used to obtain the stored token.
+func (k *OSKeychain) GetClientID() (string, error) {
+	return keyring.Get(k.service, k.keyName("client_id"))
+}
+
+// SetClientID stores the client_id associated with the stored token.
+func (k *OSKeychain) SetClientID(clientID string) error {
+	if clientID == "" {
+		// Clear client_id when empty (e.g., device code flow)
+		_ = keyring.Delete(k.service, k.keyName("client_id"))
+		return nil
+	}
+	return keyring.Set(k.service, k.keyName("client_id"), clientID)
+}
+
 // Clear removes all stored tokens.
 func (k *OSKeychain) Clear() error {
 	// Delete access token (ignore errors if not found)
 	_ = keyring.Delete(k.service, k.keyName("access_token"))
 	_ = keyring.Delete(k.service, k.keyName("refresh_token"))
 	_ = keyring.Delete(k.service, k.keyName("access_token_expiry"))
+	_ = keyring.Delete(k.service, k.keyName("client_id"))
 	return nil
 }
 
@@ -131,6 +154,7 @@ type MemoryKeychain struct {
 	accessToken  string
 	refreshToken string
 	tokenExpiry  int64
+	clientID     string
 }
 
 // Ensure MemoryKeychain implements Keychain.
@@ -183,10 +207,25 @@ func (k *MemoryKeychain) SetTokenExpiry(unix int64) error {
 	return nil
 }
 
+// GetClientID retrieves the client_id that was used to obtain the stored token.
+func (k *MemoryKeychain) GetClientID() (string, error) {
+	if k.clientID == "" {
+		return "", keyring.ErrNotFound
+	}
+	return k.clientID, nil
+}
+
+// SetClientID stores the client_id associated with the stored token.
+func (k *MemoryKeychain) SetClientID(clientID string) error {
+	k.clientID = clientID
+	return nil
+}
+
 // Clear removes all stored tokens.
 func (k *MemoryKeychain) Clear() error {
 	k.accessToken = ""
 	k.refreshToken = ""
 	k.tokenExpiry = 0
+	k.clientID = ""
 	return nil
 }

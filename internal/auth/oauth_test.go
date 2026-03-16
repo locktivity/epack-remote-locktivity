@@ -243,6 +243,66 @@ func TestGetToken_ClientCredentialsOnly_UsesClientCredentialsGrant(t *testing.T)
 	}
 }
 
+func TestGetToken_ClientCredentials_DoesNotReuseCachedTokenForDifferentClientID(t *testing.T) {
+	t.Setenv(locktivity.EnvAuthMode, AuthModeClientCredentialsOnly)
+
+	tokenRequestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenRequestCount++
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm failed: %v", err)
+		}
+		clientID := r.Form.Get("client_id")
+		w.WriteHeader(http.StatusOK)
+		// Return different tokens for different clients
+		_, _ = w.Write([]byte(`{"access_token":"tok_` + clientID + `","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer srv.Close()
+
+	keychain := NewMemoryKeychain()
+	o := NewOAuth(srv.URL, keychain)
+
+	// First request with client_A
+	t.Setenv(locktivity.EnvClientID, "client_A")
+	t.Setenv(locktivity.EnvClientSecret, "secret_A")
+	token1, err := o.GetToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetToken returned error: %v", err)
+	}
+	if token1 != "tok_client_A" {
+		t.Fatalf("expected tok_client_A, got %q", token1)
+	}
+	if tokenRequestCount != 1 {
+		t.Fatalf("expected 1 token request, got %d", tokenRequestCount)
+	}
+
+	// Second request with client_B - should NOT reuse cached token
+	t.Setenv(locktivity.EnvClientID, "client_B")
+	t.Setenv(locktivity.EnvClientSecret, "secret_B")
+	token2, err := o.GetToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetToken returned error: %v", err)
+	}
+	if token2 != "tok_client_B" {
+		t.Fatalf("expected tok_client_B, got %q", token2)
+	}
+	if tokenRequestCount != 2 {
+		t.Fatalf("expected 2 token requests (different client_id), got %d", tokenRequestCount)
+	}
+
+	// Third request with client_B again - should reuse cached token
+	token3, err := o.GetToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetToken returned error: %v", err)
+	}
+	if token3 != "tok_client_B" {
+		t.Fatalf("expected tok_client_B, got %q", token3)
+	}
+	if tokenRequestCount != 2 {
+		t.Fatalf("expected still 2 token requests (reused cache), got %d", tokenRequestCount)
+	}
+}
+
 func TestStartDeviceCodeFlow_DisabledInClientCredentialsOnlyMode(t *testing.T) {
 	t.Setenv(locktivity.EnvAuthMode, AuthModeClientCredentialsOnly)
 
@@ -359,6 +419,14 @@ func (k *failingKeychain) GetTokenExpiry() (int64, error) {
 }
 
 func (k *failingKeychain) SetTokenExpiry(unix int64) error {
+	return nil
+}
+
+func (k *failingKeychain) GetClientID() (string, error) {
+	return "", nil
+}
+
+func (k *failingKeychain) SetClientID(clientID string) error {
 	return nil
 }
 
