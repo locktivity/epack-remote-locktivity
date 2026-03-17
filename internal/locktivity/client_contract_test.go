@@ -150,7 +150,10 @@ func TestCreateRelease_ReturnsErrRateLimited(t *testing.T) {
 		Path:   APIPathPrefix + "/releases",
 		Status: http.StatusTooManyRequests,
 		Headers: map[string]string{
-			"Retry-After": "7",
+			"Retry-After":           "7",
+			"X-RateLimit-Limit":     "50",
+			"X-RateLimit-Remaining": "0",
+			"X-Request-Id":          "req-123",
 		},
 		JSONBody: APIError{Errors: []string{"too many requests"}},
 	})
@@ -163,6 +166,24 @@ func TestCreateRelease_ReturnsErrRateLimited(t *testing.T) {
 	}
 	if rateLimitErr.RetryAfter != "7" {
 		t.Fatalf("expected Retry-After 7, got %q", rateLimitErr.RetryAfter)
+	}
+	if rateLimitErr.Method != http.MethodPost {
+		t.Fatalf("expected method POST, got %q", rateLimitErr.Method)
+	}
+	if rateLimitErr.Endpoint != APIPathPrefix+"/releases" {
+		t.Fatalf("expected endpoint %q, got %q", APIPathPrefix+"/releases", rateLimitErr.Endpoint)
+	}
+	if rateLimitErr.Limit != "50" {
+		t.Fatalf("expected limit 50, got %q", rateLimitErr.Limit)
+	}
+	if rateLimitErr.Remaining != "0" {
+		t.Fatalf("expected remaining 0, got %q", rateLimitErr.Remaining)
+	}
+	if rateLimitErr.RequestID != "req-123" {
+		t.Fatalf("expected request ID req-123, got %q", rateLimitErr.RequestID)
+	}
+	if !strings.Contains(rateLimitErr.Error(), "POST "+APIPathPrefix+"/releases") {
+		t.Fatalf("expected error to include request path, got %q", rateLimitErr.Error())
 	}
 }
 

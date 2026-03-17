@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -310,23 +311,66 @@ func (c *APIClient) setHeaders(req *http.Request) {
 type ErrRateLimited struct {
 	Message    string
 	RetryAfter string
+	Method     string
+	Endpoint   string
+	Limit      string
+	Remaining  string
+	RequestID  string
 }
 
 func (e ErrRateLimited) Error() string {
-	if e.Message != "" {
-		return fmt.Sprintf("rate_limited: %s", e.Message)
+	message := e.Message
+	if message == "" {
+		message = "too many requests"
 	}
-	return "rate_limited: too many requests"
+
+	var details []string
+	if e.Method != "" || e.Endpoint != "" {
+		details = append(details, strings.TrimSpace(e.Method+" "+e.Endpoint))
+	}
+	if e.RetryAfter != "" {
+		details = append(details, "retry_after="+e.RetryAfter)
+	}
+	if e.Limit != "" {
+		details = append(details, "limit="+e.Limit)
+	}
+	if e.Remaining != "" {
+		details = append(details, "remaining="+e.Remaining)
+	}
+	if e.RequestID != "" {
+		details = append(details, "request_id="+e.RequestID)
+	}
+	if len(details) > 0 {
+		return fmt.Sprintf("rate_limited: %s (%s)", message, strings.Join(details, ", "))
+	}
+	return fmt.Sprintf("rate_limited: %s", message)
 }
 
 // handleRateLimitResponse parses a 429 response.
 func (c *APIClient) handleRateLimitResponse(resp *http.Response) error {
 	retryAfter := resp.Header.Get("Retry-After")
+	method := ""
+	endpoint := ""
+	if resp.Request != nil {
+		method = resp.Request.Method
+		if resp.Request.URL != nil {
+			endpoint = resp.Request.URL.Path
+		}
+	}
+	baseErr := ErrRateLimited{
+		RetryAfter: retryAfter,
+		Method:     method,
+		Endpoint:   endpoint,
+		Limit:      resp.Header.Get("X-RateLimit-Limit"),
+		Remaining:  resp.Header.Get("X-RateLimit-Remaining"),
+		RequestID:  resp.Header.Get("X-Request-Id"),
+	}
 	var apiErr APIError
 	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil && apiErr.ErrorString() != "" {
-		return ErrRateLimited{Message: apiErr.ErrorString(), RetryAfter: retryAfter}
+		baseErr.Message = apiErr.ErrorString()
+		return baseErr
 	}
-	return ErrRateLimited{RetryAfter: retryAfter}
+	return baseErr
 }
 
 // handleErrorResponse parses an error response.
@@ -344,13 +388,31 @@ func (c *APIClient) handleErrorResponse(resp *http.Response) error {
 }
 
 // UploadToPresignedURL uploads content to a presigned URL.
+// If the content is an *os.File, the Content-Length will be set automatically
+// from the file size. This is required for S3 presigned URLs that include
+// content-length in the signed headers.
 func (c *APIClient) UploadToPresignedURL(ctx context.Context, uploadURL string, headers map[string]string, content io.Reader) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL, content)
 	if err != nil {
 		return fmt.Errorf("failed to create upload request: %w", err)
 	}
 
+	// Set Content-Length explicitly. Go's HTTP client ignores req.Header["Content-Length"]
+	// and only uses req.ContentLength, so we must set it directly.
+	// This is required for S3 presigned URLs with content-length in signed headers.
+	if f, ok := content.(*os.File); ok {
+		info, err := f.Stat()
+		if err == nil {
+			req.ContentLength = info.Size()
+		}
+	}
+
 	for k, v := range headers {
+		// Skip Content-Length header - we handle it via req.ContentLength above.
+		// Setting it as a header doesn't work because Go's HTTP client ignores it.
+		if strings.EqualFold(k, "Content-Length") {
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 
