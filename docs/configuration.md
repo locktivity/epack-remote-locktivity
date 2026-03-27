@@ -17,6 +17,10 @@ remotes:
 The `secrets` list is required so `epack` will pass these environment variables
 through to the remote adapter process.
 
+For brokered or managed-runner setups, `epack` may instead inject
+`LOCKTIVITY_ACCESS_TOKEN` on the adapter's behalf. The adapter will always prefer
+that short-lived access token over any local OAuth flow.
+
 You can define multiple remotes for different environments:
 
 ```yaml
@@ -42,7 +46,7 @@ remotes:
 
 ## Authentication Configuration
 
-### Client Credentials (Current Supported Mode)
+### Manual Client Credentials
 
 ```bash
 export LOCKTIVITY_CLIENT_ID="your-client-id"
@@ -50,13 +54,28 @@ export LOCKTIVITY_CLIENT_SECRET="your-client-secret"
 epack push locktivity packs/evidence.epack
 ```
 
-OIDC and interactive device-code login are both coming soon.
+### Brokered Access Token
+
+```bash
+export LOCKTIVITY_ACCESS_TOKEN="your-short-lived-token"
+epack push locktivity packs/evidence.epack
+```
+
+### Interactive Device Code Login
+
+Set `LOCKTIVITY_AUTH_MODE=all` to enable interactive login and stored-token
+refresh flows.
 
 ## Troubleshooting
 
 ### "authentication required"
 
-Missing client credentials. Set both:
+Set one of the supported auth inputs:
+- `LOCKTIVITY_ACCESS_TOKEN`
+- `LOCKTIVITY_CLIENT_ID`
+- `LOCKTIVITY_CLIENT_SECRET`
+
+For client credentials, set both:
 - `LOCKTIVITY_CLIENT_ID`
 - `LOCKTIVITY_CLIENT_SECRET`
 

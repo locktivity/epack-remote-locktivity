@@ -12,7 +12,7 @@ See [docs/](docs/) for detailed documentation:
 - **Push**: Upload evidence packs and create releases
 - **Pull**: Download packs by latest release or release ID
 - **Run Sync**: Sync collector run ledgers for audit trails
-- **Auth Modes**: Client credentials (OIDC and device code coming soon)
+- **Auth Modes**: Brokered access token, client credentials, and optional device code login
 - **Secure Storage**: OS keychain integration for interactive login tokens
 - **Hardened Finalize Tokens**: Signed, expiring, single-use finalize tokens
 - **Protocol Enforcement**: Requires `protocol_version: 1` on all requests
@@ -43,9 +43,8 @@ remotes:
 ```
 
 ```bash
-# Set credentials
-export LOCKTIVITY_CLIENT_ID="..."
-export LOCKTIVITY_CLIENT_SECRET="..."
+# Managed runners typically inject a short-lived access token
+export LOCKTIVITY_ACCESS_TOKEN="..."
 
 # Push local pack
 epack push locktivity packs/evidence.epack
@@ -74,7 +73,15 @@ epack pull locktivity --digest sha256:abc123...
 
 ## Authentication
 
-Currently, only **client credentials** authentication is supported:
+The adapter prefers a pre-resolved `LOCKTIVITY_ACCESS_TOKEN` when present. That is
+the expected path for brokered or managed-runner setups:
+
+```bash
+export LOCKTIVITY_ACCESS_TOKEN="..."
+epack push locktivity packs/evidence.epack
+```
+
+For manual setups, client credentials are still supported:
 
 ```bash
 export LOCKTIVITY_CLIENT_ID="..."
@@ -82,14 +89,8 @@ export LOCKTIVITY_CLIENT_SECRET="..."
 epack push locktivity packs/evidence.epack
 ```
 
-### Coming Soon
-
-The adapter includes client-side support for additional auth modes that will be enabled once the Locktivity API supports them:
-
-- **OIDC token exchange** — For CI/CD pipelines with identity federation
-- **Device code flow** — For interactive login with keychain storage
-
-When these are available, set `LOCKTIVITY_AUTH_MODE=all` to enable them.
+For local interactive use, device code login is available when
+`LOCKTIVITY_AUTH_MODE=all`.
 
 ## Supported Operations
 
@@ -132,10 +133,10 @@ Use `--version` to confirm build flavor:
 
 | Variable | Description |
 |----------|-------------|
+| `LOCKTIVITY_ACCESS_TOKEN` | Pre-resolved bearer token for brokered or managed-runner auth |
 | `LOCKTIVITY_CLIENT_ID` | OAuth client ID for client credentials |
 | `LOCKTIVITY_CLIENT_SECRET` | OAuth client secret for client credentials |
-| `LOCKTIVITY_OIDC_TOKEN` | OIDC token for token exchange (coming soon) |
-| `LOCKTIVITY_AUTH_MODE` | Auth mode: `client_credentials_only` (default) or `all` (coming soon) |
+| `LOCKTIVITY_AUTH_MODE` | Auth mode: `client_credentials_only` (default) or `all` (enables device code login and stored-token refresh) |
 | `LOCKTIVITY_ENDPOINT` | API endpoint override (dev build only) |
 | `LOCKTIVITY_AUTH_ENDPOINT` | OAuth endpoint override (dev build only) |
 

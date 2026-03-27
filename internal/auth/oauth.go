@@ -55,9 +55,13 @@ func (o *OAuth) SetClientCredentials(clientID, clientSecret string) {
 }
 
 // GetToken returns a valid access token using the best available method.
-// Token sources are tried in order: client_credentials_only mode, OIDC exchange,
-// env-based client credentials, and finally stored tokens.
+// Token sources are tried in order: a pre-resolved access token, client_credentials_only
+// mode, OIDC exchange, env-based client credentials, and finally stored tokens.
 func (o *OAuth) GetToken(ctx context.Context) (string, error) {
+	if token := accessTokenFromEnv(); token != "" {
+		return token, nil
+	}
+
 	if err := o.validateAuthMode(); err != nil {
 		return "", err
 	}
@@ -215,6 +219,10 @@ func envClientCredentials() (clientCredentials, bool) {
 		clientSecret: os.Getenv(locktivity.EnvClientSecret),
 	}
 	return creds, creds.clientID != "" && creds.clientSecret != ""
+}
+
+func accessTokenFromEnv() string {
+	return strings.TrimSpace(os.Getenv(locktivity.EnvAccessToken))
 }
 
 func oidcTokenFromEnv() string {

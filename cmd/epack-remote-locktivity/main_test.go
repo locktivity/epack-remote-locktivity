@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/locktivity/epack-remote-locktivity/internal/locktivity"
@@ -313,7 +314,8 @@ func TestBuildCapabilities_DefaultClientCredentialsOnlyMode(t *testing.T) {
 
 	auth := caps["auth"].(map[string]any)
 	modes := auth["modes"].([]string)
-	if len(modes) != 1 || modes[0] != "client_credentials" {
+	want := []string{"access_token", "client_credentials"}
+	if !reflect.DeepEqual(modes, want) {
 		t.Fatalf("unexpected auth modes: %#v", modes)
 	}
 
@@ -333,7 +335,8 @@ func TestBuildCapabilities_ClientCredentialsOnlyMode(t *testing.T) {
 
 	auth := caps["auth"].(map[string]any)
 	modes := auth["modes"].([]string)
-	if len(modes) != 1 || modes[0] != "client_credentials" {
+	want := []string{"access_token", "client_credentials"}
+	if !reflect.DeepEqual(modes, want) {
 		t.Fatalf("unexpected auth modes: %#v", modes)
 	}
 
@@ -353,8 +356,9 @@ func TestBuildCapabilities_AllMode(t *testing.T) {
 
 	auth := caps["auth"].(map[string]any)
 	modes := auth["modes"].([]string)
-	if len(modes) != 3 {
-		t.Fatalf("expected 3 auth modes, got %d", len(modes))
+	want := []string{"access_token", "device_code", "client_credentials"}
+	if !reflect.DeepEqual(modes, want) {
+		t.Fatalf("unexpected auth modes: %#v", modes)
 	}
 
 	features := caps["features"].(map[string]bool)

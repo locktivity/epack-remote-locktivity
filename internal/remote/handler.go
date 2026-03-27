@@ -59,7 +59,7 @@ func NewHandler() *Handler {
 		oauth:    oauth,
 		keychain: keychain,
 		endpoint: endpoint,
-		tokenKey: generateTokenKey(),
+		tokenKey: generateTokenKey(keychain),
 		sleep:    time.Sleep,
 	}
 }
@@ -69,7 +69,7 @@ func NewHandlerWithClient(client locktivity.Client, oauth *auth.OAuth) *Handler 
 	return &Handler{
 		client:   client,
 		oauth:    oauth,
-		tokenKey: generateTokenKey(),
+		tokenKey: generateTokenKey(nil),
 		sleep:    time.Sleep,
 	}
 }
@@ -134,20 +134,16 @@ const (
 	maxRateLimitRetries = 5
 )
 
-func generateTokenKey() []byte {
-	// Derive a deterministic key from client credentials if available.
-	// This ensures the same key is used across prepare/finalize invocations.
-	clientID := os.Getenv(locktivity.EnvClientID)
-	clientSecret := os.Getenv(locktivity.EnvClientSecret)
-	if clientID != "" && clientSecret != "" {
+func generateTokenKey(keychain auth.Keychain) []byte {
+	// Derive a deterministic key from the auth material that will be available
+	// across separate prepare/finalize invocations.
+	if material, ok := tokenKeyMaterial(keychain); ok {
 		h := hmac.New(sha256.New, []byte("epack-remote-locktivity-token-key"))
-		h.Write([]byte(clientID))
-		h.Write([]byte(":"))
-		h.Write([]byte(clientSecret))
+		h.Write([]byte(material))
 		return h.Sum(nil)
 	}
 
-	// Fallback to random key for non-client-credentials auth modes.
+	// Fallback to random key when no stable auth material is available.
 	// Note: prepare/finalize flows will fail without deterministic key.
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err == nil {
@@ -156,6 +152,36 @@ func generateTokenKey() []byte {
 	// Fallback for extremely rare entropy failures.
 	sum := sha256.Sum256([]byte(fmt.Sprintf("fallback-%d", time.Now().UnixNano())))
 	return sum[:]
+}
+
+func tokenKeyMaterial(keychain auth.Keychain) (string, bool) {
+	if token := strings.TrimSpace(os.Getenv(locktivity.EnvAccessToken)); token != "" {
+		return "access_token:" + token, true
+	}
+
+	clientID := os.Getenv(locktivity.EnvClientID)
+	clientSecret := os.Getenv(locktivity.EnvClientSecret)
+	if clientID != "" && clientSecret != "" {
+		return "client_credentials:" + clientID + ":" + clientSecret, true
+	}
+
+	if oidcToken := strings.TrimSpace(os.Getenv(locktivity.EnvOIDCToken)); oidcToken != "" {
+		return "oidc_token:" + oidcToken, true
+	}
+
+	if keychain == nil {
+		return "", false
+	}
+
+	if refreshToken, err := keychain.GetRefreshToken(); err == nil && refreshToken != "" {
+		return "refresh_token:" + refreshToken, true
+	}
+
+	if accessToken, err := keychain.GetToken(); err == nil && accessToken != "" {
+		return "access_token:" + accessToken, true
+	}
+
+	return "", false
 }
 
 func randomNonce() string {

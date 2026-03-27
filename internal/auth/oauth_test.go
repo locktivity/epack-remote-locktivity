@@ -243,6 +243,36 @@ func TestGetToken_ClientCredentialsOnly_UsesClientCredentialsGrant(t *testing.T)
 	}
 }
 
+func TestGetToken_UsesAccessTokenEnvFirst(t *testing.T) {
+	t.Setenv(locktivity.EnvAuthMode, AuthModeClientCredentialsOnly)
+	t.Setenv(locktivity.EnvAccessToken, "access_123")
+	t.Setenv(locktivity.EnvClientID, "client_123")
+	t.Setenv(locktivity.EnvClientSecret, "secret_123")
+
+	o := NewOAuth("https://app.locktivity.com", NewMemoryKeychain())
+	token, err := o.GetToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetToken returned error: %v", err)
+	}
+	if token != "access_123" {
+		t.Fatalf("expected access_123, got %q", token)
+	}
+}
+
+func TestGetToken_AccessTokenEnvBypassesAllModeEndpointValidation(t *testing.T) {
+	t.Setenv(locktivity.EnvAuthMode, AuthModeAll)
+	t.Setenv(locktivity.EnvAccessToken, "access_123")
+
+	o := NewOAuth("https://evil.example.com", NewMemoryKeychain())
+	token, err := o.GetToken(context.Background())
+	if err != nil {
+		t.Fatalf("GetToken returned error: %v", err)
+	}
+	if token != "access_123" {
+		t.Fatalf("expected access_123, got %q", token)
+	}
+}
+
 func TestGetToken_ClientCredentials_DoesNotReuseCachedTokenForDifferentClientID(t *testing.T) {
 	t.Setenv(locktivity.EnvAuthMode, AuthModeClientCredentialsOnly)
 

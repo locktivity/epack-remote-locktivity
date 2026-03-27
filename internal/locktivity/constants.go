@@ -31,6 +31,7 @@ const (
 
 // Environment variable names.
 const (
+	EnvAccessToken  = "LOCKTIVITY_ACCESS_TOKEN"
 	EnvClientID     = "LOCKTIVITY_CLIENT_ID"
 	EnvClientSecret = "LOCKTIVITY_CLIENT_SECRET"
 	EnvOIDCToken    = "LOCKTIVITY_OIDC_TOKEN"

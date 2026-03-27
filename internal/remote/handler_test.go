@@ -472,6 +472,59 @@ func TestPushFinalize_RejectsReplay(t *testing.T) {
 	}
 }
 
+func TestFinalizeTokens_RoundTripAcrossHandlersWithAccessToken(t *testing.T) {
+	t.Setenv(locktivity.EnvAccessToken, "access_123")
+
+	handlerA := NewHandlerWithClient(locktivity.NewMockClient(), nil)
+	handlerB := NewHandlerWithClient(locktivity.NewMockClient(), nil)
+
+	token, err := handlerA.encodeSignedToken(PushFinalizeTokenData{
+		PackID:      "pack_123",
+		PackDigest:  "sha256:abc123",
+		UploadToken: "upload_token_123",
+		ExpiresAt:   4102444800,
+		Nonce:       "nonce-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to encode token: %v", err)
+	}
+
+	var tokenData PushFinalizeTokenData
+	if err := handlerB.decodeSignedToken(token, &tokenData); err != nil {
+		t.Fatalf("failed to decode token across handlers: %v", err)
+	}
+	if tokenData.UploadToken != "upload_token_123" {
+		t.Fatalf("expected upload token upload_token_123, got %q", tokenData.UploadToken)
+	}
+}
+
+func TestFinalizeTokens_RoundTripAcrossHandlersWithStoredRefreshToken(t *testing.T) {
+	keychain := auth.NewMemoryKeychain()
+	_ = keychain.SetRefreshToken("refresh_123")
+
+	handlerA := &Handler{keychain: keychain, tokenKey: generateTokenKey(keychain)}
+	handlerB := &Handler{keychain: keychain, tokenKey: generateTokenKey(keychain)}
+
+	token, err := handlerA.encodeSignedToken(PushFinalizeTokenData{
+		PackID:      "pack_123",
+		PackDigest:  "sha256:abc123",
+		UploadToken: "upload_token_123",
+		ExpiresAt:   4102444800,
+		Nonce:       "nonce-test",
+	})
+	if err != nil {
+		t.Fatalf("failed to encode token: %v", err)
+	}
+
+	var tokenData PushFinalizeTokenData
+	if err := handlerB.decodeSignedToken(token, &tokenData); err != nil {
+		t.Fatalf("failed to decode token across handlers: %v", err)
+	}
+	if tokenData.UploadToken != "upload_token_123" {
+		t.Fatalf("expected upload token upload_token_123, got %q", tokenData.UploadToken)
+	}
+}
+
 func TestRunsSync(t *testing.T) {
 	silenceTestLogs(t)
 

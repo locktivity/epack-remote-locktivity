@@ -41,14 +41,22 @@ Lookup scoping currently uses `target.environment` from the remote target.
 
 ## Authentication
 
-Current user-facing auth mode is client credentials only:
+The adapter accepts a pre-resolved access token when one is injected into the
+environment:
+
+```bash
+export LOCKTIVITY_ACCESS_TOKEN="your-short-lived-token"
+```
+
+Manual client credentials remain supported:
 
 ```bash
 export LOCKTIVITY_CLIENT_ID="your-client-id"
 export LOCKTIVITY_CLIENT_SECRET="your-client-secret"
 ```
 
-OIDC and device-code login are not part of the current user-facing setup.
+Interactive device-code login is available for local/manual use when
+`LOCKTIVITY_AUTH_MODE=all`.
 
 ## Security Model
 

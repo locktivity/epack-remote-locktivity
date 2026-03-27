@@ -92,10 +92,10 @@ func buildCapabilities() (map[string]any, error) {
 	}
 
 	authLoginEnabled := true
-	authModes := []string{"device_code", "oidc_token", "client_credentials"}
+	authModes := []string{"access_token", "device_code", "client_credentials"}
 	if authMode == auth.AuthModeClientCredentialsOnly {
 		authLoginEnabled = false
-		authModes = []string{"client_credentials"}
+		authModes = []string{"access_token", "client_credentials"}
 	}
 
 	return map[string]any{

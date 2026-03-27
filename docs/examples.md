@@ -21,6 +21,13 @@ epack push locktivity packs/evidence.epack
 epack pull locktivity
 ```
 
+## Brokered Access Token
+
+```bash
+export LOCKTIVITY_ACCESS_TOKEN="your-short-lived-token"
+epack push locktivity packs/evidence.epack
+```
+
 ## Pull by Release ID
 
 ```bash
