@@ -49,19 +49,23 @@ type Handler struct {
 var _ componentsdk.RemoteHandler = (*Handler)(nil)
 
 // NewHandler creates a new Locktivity remote handler.
-func NewHandler() *Handler {
-	endpoint, authEndpoint := locktivity.Endpoints()
+func NewHandler() (*Handler, error) {
+	endpoints, err := locktivity.ResolveEndpointConfig(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	endpoints.WarnCustomEndpoints()
 
-	keychain := auth.NewOSKeychain(authEndpoint)
-	oauth := auth.NewOAuth(authEndpoint, keychain)
+	keychain := auth.NewOSKeychain(endpoints.AuthURL)
+	oauth := auth.NewOAuth(endpoints.AuthURL, keychain)
 
 	return &Handler{
 		oauth:    oauth,
 		keychain: keychain,
-		endpoint: endpoint,
+		endpoint: endpoints.APIURL,
 		tokenKey: generateTokenKey(keychain),
 		sleep:    time.Sleep,
-	}
+	}, nil
 }
 
 // NewHandlerWithClient creates a handler with a custom client (for testing).

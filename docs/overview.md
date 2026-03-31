@@ -62,6 +62,9 @@ Interactive device-code login is available for local/manual use when
 
 - API calls use HTTPS.
 - Upload/download transfer uses time-limited presigned URLs.
+- Custom endpoints require explicit acknowledgement, must use HTTPS, and are blocked by
+  `EPACK_STRICT_PRODUCTION=true`.
+- When custom endpoints are active, the adapter emits an insecure-bypass audit event.
 
 ## Limits
 

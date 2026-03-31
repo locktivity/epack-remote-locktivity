@@ -31,13 +31,16 @@ const (
 
 // Environment variable names.
 const (
-	EnvAccessToken  = "LOCKTIVITY_ACCESS_TOKEN"
-	EnvClientID     = "LOCKTIVITY_CLIENT_ID"
-	EnvClientSecret = "LOCKTIVITY_CLIENT_SECRET"
-	EnvOIDCToken    = "LOCKTIVITY_OIDC_TOKEN"
-	EnvEndpoint     = "LOCKTIVITY_ENDPOINT"
-	EnvAuthEndpoint = "LOCKTIVITY_AUTH_ENDPOINT"
-	EnvAuthMode     = "LOCKTIVITY_AUTH_MODE"
+	EnvAccessToken                  = "LOCKTIVITY_ACCESS_TOKEN"
+	EnvClientID                     = "LOCKTIVITY_CLIENT_ID"
+	EnvClientSecret                 = "LOCKTIVITY_CLIENT_SECRET"
+	EnvOIDCToken                    = "LOCKTIVITY_OIDC_TOKEN"
+	EnvEndpoint                     = "LOCKTIVITY_ENDPOINT"
+	EnvAuthEndpoint                 = "LOCKTIVITY_AUTH_ENDPOINT"
+	EnvAuthMode = "LOCKTIVITY_AUTH_MODE"
+
+	EnvRemoteEndpoint     = "EPACK_REMOTE_ENDPOINT"
+	EnvRemoteAuthEndpoint = "EPACK_REMOTE_AUTH_ENDPOINT"
 )
 
 // Keychain constants.

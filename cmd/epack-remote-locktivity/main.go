@@ -41,7 +41,11 @@ func run() int {
 	}
 
 	// Create handler
-	handler := remote.NewHandler()
+	handler, err := remote.NewHandler()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating handler: %v\n", err)
+		return 1
+	}
 
 	// Process requests from stdin
 	scanner := bufio.NewScanner(os.Stdin)

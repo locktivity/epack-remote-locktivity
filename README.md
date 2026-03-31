@@ -40,6 +40,9 @@ remotes:
   locktivity:
     adapter: locktivity
     source: locktivity/epack-remote-locktivity@v1
+    target:
+      workspace: myorg
+      environment: prod
 ```
 
 ```bash
@@ -108,26 +111,32 @@ The binary implements Remote Adapter Protocol v1 operations:
 
 All requests must include `protocol_version: 1`.
 
-## Build Modes
+## Runtime Endpoint Overrides
 
-- Release build (default): always uses production endpoints.
-- Dev build (`-tags dev`): allows endpoint overrides via environment variables.
+The release binary always defaults to:
 
-```bash
-# Release build
-go build ./cmd/epack-remote-locktivity
-# or
-make build
+- API: `https://api.locktivity.com`
+- Auth: `https://app.locktivity.com`
 
-# Dev build
-go build -tags dev ./cmd/epack-remote-locktivity
-# or
-make build-dev
+For enterprise, staging, or local-development environments, declare custom endpoints in `epack.yaml`:
+
+```yaml
+remotes:
+  locktivity:
+    source: locktivity/epack-remote-locktivity@v1
+    insecure_endpoint: https://dev-tunnel.ngrok-free.app
+    auth:
+      insecure_endpoint: https://dev-tunnel.ngrok-free.app
 ```
 
-Use `--version` to confirm build flavor:
-- Release: `1.0.0`
-- Dev: `1.0.0+dev`
+`epack` passes those values to the adapter using trusted explicit env. The adapter also supports
+direct environment-based overrides for standalone/manual testing:
+
+```bash
+EPACK_REMOTE_ENDPOINT=https://dev-tunnel.ngrok-free.app \
+EPACK_REMOTE_AUTH_ENDPOINT=https://dev-tunnel.ngrok-free.app \
+./bin/epack-remote-locktivity --capabilities
+```
 
 ## Environment Variables
 
@@ -137,8 +146,10 @@ Use `--version` to confirm build flavor:
 | `LOCKTIVITY_CLIENT_ID` | OAuth client ID for client credentials |
 | `LOCKTIVITY_CLIENT_SECRET` | OAuth client secret for client credentials |
 | `LOCKTIVITY_AUTH_MODE` | Auth mode: `client_credentials_only` (default) or `all` (enables device code login and stored-token refresh) |
-| `LOCKTIVITY_ENDPOINT` | API endpoint override (dev build only) |
-| `LOCKTIVITY_AUTH_ENDPOINT` | OAuth endpoint override (dev build only) |
+| `EPACK_REMOTE_ENDPOINT` | Trusted API endpoint override passed by `epack` (from `insecure_endpoint` config) |
+| `EPACK_REMOTE_AUTH_ENDPOINT` | Trusted auth endpoint override passed by `epack` (from `auth.insecure_endpoint` config) |
+| `LOCKTIVITY_ENDPOINT` | Backward-compatible API endpoint override for standalone/manual use |
+| `LOCKTIVITY_AUTH_ENDPOINT` | Backward-compatible auth endpoint override for standalone/manual use |
 
 ## Security Notes
 
@@ -146,6 +157,8 @@ Use `--version` to confirm build flavor:
   - Expiration (`exp`)
   - Nonce (`nonce`) with replay protection (single-use)
 - `pull.finalize` verifies request digest matches token digest
+- Custom endpoints must use HTTPS, are blocked by `EPACK_STRICT_PRODUCTION=true`,
+  and emit an insecure-bypass audit event
 - Keychain entries are namespaced by auth endpoint host to avoid cross-environment token collisions
 - Stored keychain tokens include expiry metadata and are refreshed using refresh tokens when expired
 - `auth.login` and `pull.prepare` are rate-limited to reduce abuse potential
@@ -161,9 +174,6 @@ Use `--version` to confirm build flavor:
 ```bash
 # Release build
 make build
-
-# Dev build
-make build-dev
 
 # Unit tests
 make test
@@ -182,16 +192,6 @@ make sdk-run
 `make sdk-run` requires an `epack` binary with SDK commands available in your `PATH`.
 Direct `epack sdk test ...` invocations also require `epack-conformance` on `PATH`, typically via
 `export PATH="$PATH:$(go env GOPATH)/bin"` or a configured `GOBIN`.
-
-For dev/local endpoint testing:
-
-```bash
-make build-dev
-
-LOCKTIVITY_ENDPOINT="http://api.localhost:3000" \
-LOCKTIVITY_AUTH_ENDPOINT="http://app.localhost:3001" \
-./bin/epack-remote-locktivity --capabilities
-```
 
 ## License
 

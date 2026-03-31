@@ -9,10 +9,8 @@ build:
 	mkdir -p $(BUILD_DIR)
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
 
-# Build the dev binary
-build-dev:
-	mkdir -p $(BUILD_DIR)
-	go build -tags dev -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_DIR)
+# Compatibility alias: runtime endpoint overrides no longer require a special build.
+build-dev: build
 
 # Run tests
 test:

@@ -28,6 +28,22 @@ export LOCKTIVITY_ACCESS_TOKEN="your-short-lived-token"
 epack push locktivity packs/evidence.epack
 ```
 
+## Custom Development Endpoint
+
+```yaml
+remotes:
+  locktivity-dev:
+    adapter: locktivity
+    source: locktivity/epack-remote-locktivity@v1
+    insecure_endpoint: https://dev-tunnel.ngrok-free.app
+    auth:
+      insecure_endpoint: https://dev-tunnel.ngrok-free.app
+```
+
+```bash
+epack push locktivity-dev packs/evidence.epack
+```
+
 ## Pull by Release ID
 
 ```bash
