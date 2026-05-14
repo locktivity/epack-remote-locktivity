@@ -99,10 +99,12 @@ func (c EndpointConfig) AuditAttrs() map[string]string {
 	if c.CustomAPI != "" {
 		attrs["remote_endpoint_host"] = endpointHost(c.CustomAPI)
 		attrs["remote_endpoint_has_path"] = boolString(endpointHasPath(c.CustomAPI))
+		attrs["remote_endpoint_scheme"] = endpointScheme(c.CustomAPI)
 	}
 	if c.CustomAuth != "" {
 		attrs["remote_auth_endpoint_host"] = endpointHost(c.CustomAuth)
 		attrs["remote_auth_endpoint_has_path"] = boolString(endpointHasPath(c.CustomAuth))
+		attrs["remote_auth_endpoint_scheme"] = endpointScheme(c.CustomAuth)
 	}
 	return attrs
 }
@@ -114,9 +116,17 @@ func (c EndpointConfig) WarnCustomEndpoints() {
 	}
 	if c.CustomAPI != "" {
 		_, _ = fmt.Fprintf(os.Stderr, "WARNING: Running with custom remote endpoint %s.\n", c.CustomAPI)
+		warnIfPlainHTTP("remote endpoint", c.CustomAPI)
 	}
 	if c.CustomAuth != "" {
 		_, _ = fmt.Fprintf(os.Stderr, "WARNING: Running with custom remote auth endpoint %s.\n", c.CustomAuth)
+		warnIfPlainHTTP("remote auth endpoint", c.CustomAuth)
+	}
+}
+
+func warnIfPlainHTTP(field, rawURL string) {
+	if endpointScheme(rawURL) == "http" {
+		_, _ = fmt.Fprintf(os.Stderr, "WARNING: %s is using plain HTTP. This is allowed only in dev-tagged builds and MUST NOT be used in production.\n", field)
 	}
 }
 
@@ -157,7 +167,9 @@ func validateCustomEndpoint(field, raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%s: invalid URL: %w", field, err)
 	}
-	if strings.ToLower(parsed.Scheme) != "https" {
+	scheme := strings.ToLower(parsed.Scheme)
+	schemeAllowed := scheme == "https" || (scheme == "http" && allowInsecureHTTPInDevBuilds)
+	if !schemeAllowed {
 		return "", fmt.Errorf("%s: must use HTTPS (got %q)", field, parsed.Scheme)
 	}
 	if parsed.Host == "" {
@@ -198,6 +210,14 @@ func endpointHasPath(rawURL string) bool {
 		return false
 	}
 	return parsed.Path != "" && parsed.Path != "/"
+}
+
+func endpointScheme(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme)
 }
 
 func boolString(v bool) string {
