@@ -1,5 +1,91 @@
 package remote
 
+import "github.com/locktivity/epack/componentsdk"
+
+// PushPrepareRequest is the request for push.prepare operations.
+type PushPrepareRequest struct {
+	RequestID string       `json:"request_id"`
+	Remote    string       `json:"remote"`
+	Target    RemoteTarget `json:"target"`
+	Pack      PackInfo     `json:"pack"`
+	Release   ReleaseInfo  `json:"release"`
+	Identity  *AuthHints   `json:"identity,omitempty"`
+}
+
+type PushPrepareResponse = componentsdk.PushPrepareResponse
+type PushFinalizeResponse = componentsdk.PushFinalizeResponse
+type PullPrepareRequest = componentsdk.PullPrepareRequest
+type PullPrepareResponse = componentsdk.PullPrepareResponse
+type PullFinalizeRequest = componentsdk.PullFinalizeRequest
+type PullFinalizeResponse = componentsdk.PullFinalizeResponse
+type UploadInfo = componentsdk.UploadInfo
+type DownloadInfo = componentsdk.DownloadInfo
+type PackResult = componentsdk.PackResult
+type ReleaseResult = componentsdk.ReleaseResult
+type AuthHints = componentsdk.AuthHints
+
+// PushFinalizeRequest is the request for push.finalize operations.
+type PushFinalizeRequest struct {
+	RequestID     string       `json:"request_id"`
+	Remote        string       `json:"remote"`
+	Target        RemoteTarget `json:"target"`
+	Pack          PackInfo     `json:"pack"`
+	Release       ReleaseInfo  `json:"release,omitempty"`
+	FinalizeToken string       `json:"finalize_token"`
+}
+
+type PackInfo struct {
+	Path           string `json:"path,omitempty"`
+	Digest         string `json:"digest"`
+	ManifestDigest string `json:"manifest_digest,omitempty"`
+	FileDigest     string `json:"file_digest,omitempty"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Checksum       string `json:"checksum,omitempty"`
+}
+
+type ReleaseInfo struct {
+	Version        string            `json:"version,omitempty"`
+	Notes          string            `json:"notes,omitempty"`
+	Labels         []string          `json:"labels,omitempty"`
+	BuildContext   map[string]string `json:"build_context,omitempty"`
+	LockProvenance *LockProvenance   `json:"lock_provenance,omitempty"`
+}
+
+// LockReportRequest is the request for lock.report operations.
+type LockReportRequest struct {
+	Type           string         `json:"type"`
+	RequestID      string         `json:"request_id"`
+	Remote         string         `json:"remote"`
+	Target         RemoteTarget   `json:"target"`
+	LockProvenance LockProvenance `json:"lock_provenance"`
+	Identity       *AuthHints     `json:"identity,omitempty"`
+}
+
+// LockReportResponse is the response for lock.report operations.
+type LockReportResponse struct {
+	OK             bool   `json:"ok"`
+	Type           string `json:"type"`
+	RequestID      string `json:"request_id"`
+	Status         string `json:"status"`
+	Outcome        string `json:"outcome,omitempty"`
+	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
+	RevisionID     string `json:"revision_id,omitempty"`
+}
+
+type LockProvenance struct {
+	Lockfile       string         `json:"lockfile,omitempty"`
+	LockfileSHA256 string         `json:"lockfile_sha256,omitempty"`
+	LockfilePath   string         `json:"lockfile_path,omitempty"`
+	Summary        any            `json:"summary,omitempty"`
+	RuntimeContext map[string]any `json:"runtime_context,omitempty"`
+	TriggerKind    string         `json:"trigger_kind"`
+	Outcome        string         `json:"outcome"`
+	FailureCode    string         `json:"failure_code,omitempty"`
+	FailureMessage string         `json:"failure_message,omitempty"`
+	ReportedAt     string         `json:"reported_at,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
 // RunsSyncRequest is the request for runs.sync operations.
 type RunsSyncRequest struct {
 	Type       string       `json:"type"`
@@ -12,6 +98,7 @@ type RunsSyncRequest struct {
 // RemoteTarget contains caller-provided target selectors.
 // Locktivity currently uses environment for release lookups.
 type RemoteTarget struct {
+	Workspace   string `json:"workspace,omitempty"`
 	Stream      string `json:"stream"`
 	Environment string `json:"environment,omitempty"`
 }

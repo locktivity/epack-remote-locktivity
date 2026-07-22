@@ -115,6 +115,37 @@ func TestProcessRequest_AuthWhoamiSuccess(t *testing.T) {
 	}
 }
 
+func TestProcessRequest_LockReportSuccess(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	handler := remote.NewHandlerWithClient(mockClient, nil)
+
+	resp := processRequest([]byte(`{
+		"type":"lock.report",
+		"request_id":"req_1",
+		"protocol_version":1,
+		"lock_provenance":{
+			"lockfile":"schema_version: 1\n",
+			"lockfile_sha256":"lock-sha",
+			"trigger_kind":"bootstrap",
+			"outcome":"success",
+			"runtime_context":{
+				"pipeline_id":"pipeline-123",
+				"github":{"repository":"acme/evidence","ref":"refs/heads/locktivity/setup"}
+			}
+		}
+	}`), handler)
+
+	if got := resp["ok"]; got != true {
+		t.Fatalf("expected ok=true, got %v", got)
+	}
+	if got := resp["type"]; got != "lock.report.result" {
+		t.Fatalf("expected lock.report.result, got %v", got)
+	}
+	if len(mockClient.ReportLockCalls) != 1 {
+		t.Fatalf("expected one ReportLock call, got %d", len(mockClient.ReportLockCalls))
+	}
+}
+
 func TestProcessRequest_ParseErrorsByOperation(t *testing.T) {
 	handler := remote.NewHandlerWithClient(locktivity.NewMockClient(), nil)
 
@@ -147,6 +178,11 @@ func TestProcessRequest_ParseErrorsByOperation(t *testing.T) {
 			name:    "runs.sync",
 			payload: `{"type":"runs.sync","request_id":"req_1","protocol_version":1,"pack_digest":"sha256:abc","runs":"oops"}`,
 			wantMsg: "failed to parse runs.sync request",
+		},
+		{
+			name:    "lock.report",
+			payload: `{"type":"lock.report","request_id":"req_1","protocol_version":1,"lock_provenance":"oops"}`,
+			wantMsg: "failed to parse lock.report request",
 		},
 	}
 
@@ -365,6 +401,9 @@ func TestBuildCapabilities_AllMode(t *testing.T) {
 	if !features["auth_login"] {
 		t.Fatal("expected auth_login=true")
 	}
+	if !features["lock_report"] {
+		t.Fatal("expected lock_report=true")
+	}
 }
 
 func TestBuildCapabilities_InvalidAuthMode(t *testing.T) {
@@ -376,23 +415,24 @@ func TestBuildCapabilities_InvalidAuthMode(t *testing.T) {
 }
 
 type fakeRequestHandler struct {
-	pushPrepare  func(req componentsdk.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error)
-	pushFinalize func(req componentsdk.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error)
+	pushPrepare  func(req remote.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error)
+	pushFinalize func(req remote.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error)
 	pullPrepare  func(req componentsdk.PullPrepareRequest) (*componentsdk.PullPrepareResponse, error)
 	pullFinalize func(req componentsdk.PullFinalizeRequest) (*componentsdk.PullFinalizeResponse, error)
+	lockReport   func(req remote.LockReportRequest) (*remote.LockReportResponse, error)
 	runsSync     func(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	authLogin    func(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
 	authWhoami   func(req remote.AuthWhoamiRequest) (*remote.AuthWhoamiResponse, error)
 }
 
-func (f fakeRequestHandler) PushPrepare(req componentsdk.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error) {
+func (f fakeRequestHandler) PushPrepare(req remote.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error) {
 	if f.pushPrepare != nil {
 		return f.pushPrepare(req)
 	}
 	return &componentsdk.PushPrepareResponse{}, nil
 }
 
-func (f fakeRequestHandler) PushFinalize(req componentsdk.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error) {
+func (f fakeRequestHandler) PushFinalize(req remote.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error) {
 	if f.pushFinalize != nil {
 		return f.pushFinalize(req)
 	}
@@ -411,6 +451,13 @@ func (f fakeRequestHandler) PullFinalize(req componentsdk.PullFinalizeRequest) (
 		return f.pullFinalize(req)
 	}
 	return &componentsdk.PullFinalizeResponse{}, nil
+}
+
+func (f fakeRequestHandler) LockReport(req remote.LockReportRequest) (*remote.LockReportResponse, error) {
+	if f.lockReport != nil {
+		return f.lockReport(req)
+	}
+	return &remote.LockReportResponse{}, nil
 }
 
 func (f fakeRequestHandler) RunsSync(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error) {

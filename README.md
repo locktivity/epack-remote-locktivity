@@ -106,6 +106,7 @@ The binary implements Remote Adapter Protocol v1 operations:
 | `pull.prepare` | Resolve latest release or a release ID |
 | `pull.finalize` | Confirm download completion |
 | `runs.sync` | Sync run ledgers to Locktivity |
+| `lock.report` | Report resolved lockfile provenance without pushing a pack |
 | `auth.login` | Start device code flow |
 | `auth.whoami` | Return current identity status |
 

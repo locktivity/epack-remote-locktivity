@@ -45,9 +45,6 @@ type Handler struct {
 	lastPullPrepareAt time.Time
 }
 
-// Ensure Handler implements RemoteHandler.
-var _ componentsdk.RemoteHandler = (*Handler)(nil)
-
 // NewHandler creates a new Locktivity remote handler.
 func NewHandler() (*Handler, error) {
 	endpoints, err := locktivity.ResolveEndpointConfig(os.Getenv)
@@ -296,7 +293,7 @@ func (h *Handler) allowRateLimited(op string, minInterval time.Duration) bool {
 }
 
 // PushPrepare handles push.prepare requests.
-func (h *Handler) PushPrepare(req componentsdk.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error) {
+func (h *Handler) PushPrepare(req PushPrepareRequest) (*componentsdk.PushPrepareResponse, error) {
 	ctx := context.Background()
 
 	client, err := h.getClient(ctx)
@@ -366,7 +363,7 @@ func (h *Handler) PushPrepare(req componentsdk.PushPrepareRequest) (*componentsd
 }
 
 // PushFinalize handles push.finalize requests.
-func (h *Handler) PushFinalize(req componentsdk.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error) {
+func (h *Handler) PushFinalize(req PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error) {
 	ctx := context.Background()
 
 	client, err := h.getClient(ctx)
@@ -386,13 +383,14 @@ func (h *Handler) PushFinalize(req componentsdk.PushFinalizeRequest) (*component
 	}
 
 	releaseReq := locktivity.CreateReleaseRequest{
-		FinalizeToken: tokenData.FinalizeToken,
-		UploadToken:   tokenData.UploadToken,
-		Environment:   tokenData.Environment,
-		Version:       tokenData.Version,
-		Notes:         tokenData.Notes,
-		Labels:        tokenData.Labels,
-		BuildContext:  tokenData.BuildContext,
+		FinalizeToken:  tokenData.FinalizeToken,
+		UploadToken:    tokenData.UploadToken,
+		Environment:    tokenData.Environment,
+		Version:        tokenData.Version,
+		Notes:          tokenData.Notes,
+		Labels:         tokenData.Labels,
+		BuildContext:   tokenData.BuildContext,
+		LockProvenance: req.Release.LockProvenance,
 	}
 
 	// Retry loop for 202 Accepted (processing) and 429 (rate limit) responses
@@ -453,6 +451,86 @@ func (h *Handler) PushFinalize(req componentsdk.PushFinalizeRequest) (*component
 			Version:    releaseResp.Version,
 		},
 	}, nil
+}
+
+// LockReport handles lock.report requests.
+func (h *Handler) LockReport(req LockReportRequest) (*LockReportResponse, error) {
+	ctx := context.Background()
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	reportResp, err := client.ReportLock(ctx, lockfileReportRequest(req.LockProvenance))
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	return &LockReportResponse{
+		OK:             true,
+		Type:           "lock.report.result",
+		RequestID:      req.RequestID,
+		Status:         reportResp.Status,
+		Outcome:        reportResp.Outcome,
+		LockfileSHA256: reportResp.LockfileSHA256,
+		RevisionID:     reportResp.RevisionID,
+	}, nil
+}
+
+func lockfileReportRequest(provenance LockProvenance) locktivity.CreateLockfileReportRequest {
+	github := nestedStringMap(provenance.RuntimeContext["github"])
+	repoOwner, repoName := splitRepository(github["repository"])
+	ref := github["ref"]
+	return locktivity.CreateLockfileReportRequest{
+		PipelineID:     stringValue(provenance.RuntimeContext["pipeline_id"]),
+		RepoOwner:      repoOwner,
+		RepoName:       repoName,
+		Branch:         branchFromRef(ref),
+		Ref:            ref,
+		TriggerKind:    provenance.TriggerKind,
+		Outcome:        provenance.Outcome,
+		Lockfile:       provenance.Lockfile,
+		LockfileSHA256: provenance.LockfileSHA256,
+		ReportedAt:     provenance.ReportedAt,
+		FailureCode:    provenance.FailureCode,
+		FailureMessage: provenance.FailureMessage,
+		Summary:        provenance.Summary,
+		RuntimeContext: provenance.RuntimeContext,
+		Metadata:       provenance.Metadata,
+	}
+}
+
+func nestedStringMap(value any) map[string]string {
+	result := map[string]string{}
+	switch typed := value.(type) {
+	case map[string]string:
+		return typed
+	case map[string]any:
+		for key, entry := range typed {
+			result[key] = stringValue(entry)
+		}
+	}
+	return result
+}
+
+func stringValue(value any) string {
+	if str, ok := value.(string); ok {
+		return str
+	}
+	return ""
+}
+
+func splitRepository(repository string) (string, string) {
+	parts := strings.SplitN(repository, "/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
+}
+
+func branchFromRef(ref string) string {
+	return strings.TrimPrefix(ref, "refs/heads/")
 }
 
 // PullPrepare handles pull.prepare requests.

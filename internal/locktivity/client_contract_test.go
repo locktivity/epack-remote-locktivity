@@ -58,6 +58,59 @@ func TestCreatePack_UsesPackEnvelope(t *testing.T) {
 	}
 }
 
+func TestReportLock_UsesLockfileReportEnvelope(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/lockfile_reports",
+		Status: http.StatusCreated,
+		Check: func(t *testing.T, r *http.Request, body []byte) {
+			t.Helper()
+
+			var payload map[string]map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+
+			report, ok := payload["lockfile_report"]
+			if !ok {
+				t.Fatalf("expected top-level lockfile_report envelope, got %v", payload)
+			}
+			if report["pipeline_id"] != "pipeline-123" {
+				t.Fatalf("expected pipeline_id pipeline-123, got %v", report["pipeline_id"])
+			}
+			if report["lockfile_sha256"] != "lock-sha" {
+				t.Fatalf("expected lockfile_sha256 lock-sha, got %v", report["lockfile_sha256"])
+			}
+		},
+		JSONBody: LockfileReportResponse{
+			ID:             "rev_123",
+			PipelineID:     "pipeline-123",
+			RevisionID:     "rev_123",
+			Outcome:        "success",
+			LockfileSHA256: "lock-sha",
+			Status:         "accepted",
+		},
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.ReportLock(context.Background(), CreateLockfileReportRequest{
+		PipelineID:     "pipeline-123",
+		RepoOwner:      "acme",
+		RepoName:       "evidence",
+		Branch:         "locktivity/setup",
+		TriggerKind:    "bootstrap",
+		Outcome:        "success",
+		Lockfile:       "schema_version: 1\n",
+		LockfileSHA256: "lock-sha",
+	})
+	if err != nil {
+		t.Fatalf("ReportLock failed: %v", err)
+	}
+	if resp.Status != "accepted" {
+		t.Fatalf("expected accepted status, got %q", resp.Status)
+	}
+}
+
 func TestReleaseLookups_UseSupportedQueryParams(t *testing.T) {
 	tests := []struct {
 		name  string

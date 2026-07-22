@@ -19,6 +19,8 @@ type MockClient struct {
 	ConsumeFinalizeIntentError     error
 	CreateReleaseResponse          *ReleaseResponse
 	CreateReleaseError             error
+	ReportLockResponse             *LockfileReportResponse
+	ReportLockError                error
 	GetReleaseResponse             *ReleaseResponse
 	GetReleaseError                error
 	GetLatestReleaseResponse       *ReleaseResponse
@@ -40,6 +42,7 @@ type MockClient struct {
 	CreateFinalizeIntentCalls   []CreateFinalizeIntentRequest
 	ConsumeFinalizeIntentCalls  []ConsumeFinalizeIntentRequest
 	CreateReleaseCalls          []CreateReleaseRequest
+	ReportLockCalls             []CreateLockfileReportRequest
 	GetReleaseCalls             []string
 	GetLatestReleaseCalls       []GetLatestReleaseCall
 	GetVersionReleaseCalls      []GetVersionReleaseCall
@@ -114,6 +117,14 @@ func NewMockClient() *MockClient {
 				ID: "pack_123",
 			},
 		},
+		ReportLockResponse: &LockfileReportResponse{
+			ID:             "rev_123",
+			PipelineID:     "pipeline_123",
+			RevisionID:     "rev_123",
+			Outcome:        "success",
+			LockfileSHA256: "abc123",
+			Status:         "accepted",
+		},
 		GetLatestReleaseResponse: &ReleaseResponse{
 			ID: "rel_123",
 			Pack: &PackInfo{
@@ -186,6 +197,14 @@ func (m *MockClient) CreateRelease(ctx context.Context, req CreateReleaseRequest
 		return nil, m.CreateReleaseError
 	}
 	return m.CreateReleaseResponse, nil
+}
+
+func (m *MockClient) ReportLock(ctx context.Context, req CreateLockfileReportRequest) (*LockfileReportResponse, error) {
+	m.ReportLockCalls = append(m.ReportLockCalls, req)
+	if m.ReportLockError != nil {
+		return nil, m.ReportLockError
+	}
+	return m.ReportLockResponse, nil
 }
 
 func (m *MockClient) GetRelease(ctx context.Context, releaseID string) (*ReleaseResponse, error) {

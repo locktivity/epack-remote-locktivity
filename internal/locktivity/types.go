@@ -47,13 +47,43 @@ type DownloadInfo struct {
 
 // CreateReleaseRequest is sent to POST /releases.
 type CreateReleaseRequest struct {
-	FinalizeToken string            `json:"finalize_token"`
-	UploadToken   string            `json:"upload_token,omitempty"`
-	Environment   string            `json:"environment,omitempty"`
-	Version       string            `json:"version,omitempty"`
-	Notes         string            `json:"notes,omitempty"`
-	Labels        []string          `json:"labels,omitempty"`
-	BuildContext  map[string]string `json:"build_context,omitempty"`
+	FinalizeToken  string            `json:"finalize_token"`
+	UploadToken    string            `json:"upload_token,omitempty"`
+	Environment    string            `json:"environment,omitempty"`
+	Version        string            `json:"version,omitempty"`
+	Notes          string            `json:"notes,omitempty"`
+	Labels         []string          `json:"labels,omitempty"`
+	BuildContext   map[string]string `json:"build_context,omitempty"`
+	LockProvenance any               `json:"lock_provenance,omitempty"`
+}
+
+// CreateLockfileReportRequest is sent to POST /lockfile_reports.
+type CreateLockfileReportRequest struct {
+	PipelineID     string         `json:"pipeline_id,omitempty"`
+	RepoOwner      string         `json:"repo_owner,omitempty"`
+	RepoName       string         `json:"repo_name,omitempty"`
+	Branch         string         `json:"branch,omitempty"`
+	Ref            string         `json:"ref,omitempty"`
+	TriggerKind    string         `json:"trigger_kind,omitempty"`
+	Outcome        string         `json:"outcome,omitempty"`
+	Lockfile       string         `json:"lockfile,omitempty"`
+	LockfileSHA256 string         `json:"lockfile_sha256,omitempty"`
+	ReportedAt     string         `json:"reported_at,omitempty"`
+	FailureCode    string         `json:"failure_code,omitempty"`
+	FailureMessage string         `json:"failure_message,omitempty"`
+	Summary        any            `json:"summary,omitempty"`
+	RuntimeContext map[string]any `json:"runtime_context,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+}
+
+// LockfileReportResponse is returned from POST /lockfile_reports.
+type LockfileReportResponse struct {
+	ID             string `json:"id,omitempty"`
+	PipelineID     string `json:"pipeline_id,omitempty"`
+	RevisionID     string `json:"revision_id,omitempty"`
+	Outcome        string `json:"outcome,omitempty"`
+	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
+	Status         string `json:"status,omitempty"`
 }
 
 type CreateFinalizeIntentRequest struct {
@@ -129,13 +159,13 @@ type PackRunsResponse struct {
 
 // PackRunInfo contains info about a synced run.
 type PackRunInfo struct {
-	ID           string              `json:"id"`
-	RunID        string              `json:"run_id"`
-	ResultPath   string              `json:"result_path"`
-	ResultDigest string              `json:"result_digest"`
-	Status       string              `json:"status"`
-	CreatedAt    time.Time           `json:"created_at"`
-	Outputs      []OutputUploadInfo  `json:"outputs,omitempty"`
+	ID           string             `json:"id"`
+	RunID        string             `json:"run_id"`
+	ResultPath   string             `json:"result_path"`
+	ResultDigest string             `json:"result_digest"`
+	Status       string             `json:"status"`
+	CreatedAt    time.Time          `json:"created_at"`
+	Outputs      []OutputUploadInfo `json:"outputs,omitempty"`
 }
 
 // OutputUploadInfo contains presigned upload info for an output file.

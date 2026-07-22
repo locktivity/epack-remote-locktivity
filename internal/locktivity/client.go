@@ -28,6 +28,9 @@ type Client interface {
 	GetReleaseByVersion(ctx context.Context, version, environment string) (*ReleaseResponse, error)
 	GetReleaseByDigest(ctx context.Context, digest, environment string) (*ReleaseResponse, error)
 
+	// Lockfile report operations
+	ReportLock(ctx context.Context, req CreateLockfileReportRequest) (*LockfileReportResponse, error)
+
 	// Run operations
 	SyncRuns(ctx context.Context, req CreatePackRunsRequest) (*PackRunsResponse, error)
 	ConfirmRunOutputUpload(ctx context.Context, outputID string, req ConfirmRunOutputUploadRequest) (*ConfirmRunOutputUploadResponse, error)
@@ -139,6 +142,21 @@ func (c *APIClient) CreateRelease(ctx context.Context, req CreateReleaseRequest)
 
 	var resp ReleaseResponse
 	if err := c.doJSON(ctx, http.MethodPost, path, createReleaseWrapper{Release: req}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+type createLockfileReportWrapper struct {
+	LockfileReport CreateLockfileReportRequest `json:"lockfile_report"`
+}
+
+// ReportLock reports resolved lockfile provenance to Locktivity.
+func (c *APIClient) ReportLock(ctx context.Context, req CreateLockfileReportRequest) (*LockfileReportResponse, error) {
+	path := fmt.Sprintf("%s/lockfile_reports", APIPathPrefix)
+
+	var resp LockfileReportResponse
+	if err := c.doJSON(ctx, http.MethodPost, path, createLockfileReportWrapper{LockfileReport: req}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

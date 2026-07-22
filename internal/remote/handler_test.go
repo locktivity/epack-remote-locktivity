@@ -32,12 +32,12 @@ func TestPushPrepare(t *testing.T) {
 		endpoint: "https://api.locktivity.com",
 	}
 
-	req := componentsdk.PushPrepareRequest{
+	req := PushPrepareRequest{
 		RequestID: "req_123",
-		Target: componentsdk.RemoteTarget{
+		Target: RemoteTarget{
 			Environment: "prod",
 		},
-		Pack: componentsdk.PackInfo{
+		Pack: PackInfo{
 			Digest:    "sha256:abc123",
 			SizeBytes: 1024,
 		},
@@ -92,9 +92,16 @@ func TestPushFinalize(t *testing.T) {
 		t.Fatalf("failed to encode token: %v", err)
 	}
 
-	req := componentsdk.PushFinalizeRequest{
+	req := PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: token,
+		Release: ReleaseInfo{
+			LockProvenance: &LockProvenance{
+				LockfileSHA256: "lock-sha",
+				TriggerKind:    "frozen_check",
+				Outcome:        "success",
+			},
+		},
 	}
 
 	resp, err := handler.PushFinalize(req)
@@ -113,6 +120,53 @@ func TestPushFinalize(t *testing.T) {
 	if call.FinalizeToken != "fin_123" {
 		t.Fatalf("expected finalize_token fin_123, got %q", call.FinalizeToken)
 	}
+	if provenance, ok := call.LockProvenance.(*LockProvenance); !ok || provenance.LockfileSHA256 != "lock-sha" {
+		t.Fatalf("expected lock provenance on release request, got %#v", call.LockProvenance)
+	}
+}
+
+func TestLockReport(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.LockReport(LockReportRequest{
+		RequestID: "req_123",
+		LockProvenance: LockProvenance{
+			Lockfile:       "schema_version: 1\n",
+			LockfileSHA256: "lock-sha",
+			TriggerKind:    "bootstrap",
+			Outcome:        "success",
+			ReportedAt:     "2026-05-25T12:00:00Z",
+			Summary:        map[string]any{"schema_version": float64(1)},
+			RuntimeContext: map[string]any{
+				"pipeline_id": "pipeline-123",
+				"github": map[string]any{
+					"repository": "acme/evidence",
+					"ref":        "refs/heads/locktivity/setup",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("LockReport failed: %v", err)
+	}
+
+	if resp.Status != "accepted" {
+		t.Fatalf("expected accepted status, got %q", resp.Status)
+	}
+	if len(mockClient.ReportLockCalls) != 1 {
+		t.Fatalf("expected one ReportLock call, got %d", len(mockClient.ReportLockCalls))
+	}
+	call := mockClient.ReportLockCalls[0]
+	if call.PipelineID != "pipeline-123" || call.RepoOwner != "acme" || call.RepoName != "evidence" {
+		t.Fatalf("unexpected repo context: %#v", call)
+	}
+	if call.Branch != "locktivity/setup" {
+		t.Fatalf("expected branch locktivity/setup, got %q", call.Branch)
+	}
+	if call.LockfileSHA256 != "lock-sha" {
+		t.Fatalf("expected lock sha, got %q", call.LockfileSHA256)
+	}
 }
 
 func TestPushPrepare_ExistingPackIncludesFinalizeToken(t *testing.T) {
@@ -126,12 +180,12 @@ func TestPushPrepare_ExistingPackIncludesFinalizeToken(t *testing.T) {
 		client: mockClient,
 	}
 
-	req := componentsdk.PushPrepareRequest{
+	req := PushPrepareRequest{
 		RequestID: "req_123",
-		Target: componentsdk.RemoteTarget{
+		Target: RemoteTarget{
 			Environment: "prod",
 		},
-		Pack: componentsdk.PackInfo{
+		Pack: PackInfo{
 			Digest:    "sha256:abc123",
 			SizeBytes: 1024,
 		},
@@ -435,7 +489,7 @@ func TestPushFinalize_RejectsTamperedToken(t *testing.T) {
 	}
 	tampered := token[:len(token)-1] + "x"
 
-	_, err = handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	_, err = handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: tampered,
 	})
@@ -459,7 +513,7 @@ func TestPushFinalize_RejectsReplay(t *testing.T) {
 		t.Fatalf("failed to encode token: %v", err)
 	}
 
-	req := componentsdk.PushFinalizeRequest{
+	req := PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: token,
 	}

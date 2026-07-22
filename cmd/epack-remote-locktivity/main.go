@@ -16,10 +16,11 @@ const baseVersion = "1.0.0"
 var version = baseVersion + versionSuffix
 
 type requestHandler interface {
-	PushPrepare(req componentsdk.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error)
-	PushFinalize(req componentsdk.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error)
+	PushPrepare(req remote.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error)
+	PushFinalize(req remote.PushFinalizeRequest) (*componentsdk.PushFinalizeResponse, error)
 	PullPrepare(req componentsdk.PullPrepareRequest) (*componentsdk.PullPrepareResponse, error)
 	PullFinalize(req componentsdk.PullFinalizeRequest) (*componentsdk.PullFinalizeResponse, error)
+	LockReport(req remote.LockReportRequest) (*remote.LockReportResponse, error)
 	RunsSync(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	AuthLogin(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
 	AuthWhoami(req remote.AuthWhoamiRequest) (*remote.AuthWhoamiResponse, error)
@@ -112,6 +113,7 @@ func buildCapabilities() (map[string]any, error) {
 			"prepare_finalize": true,
 			"pull":             true,
 			"runs_sync":        true,
+			"lock_report":      true,
 			"auth_login":       authLoginEnabled,
 			"whoami":           true,
 		},
@@ -162,6 +164,7 @@ func dispatchRequest(base baseRequest, data []byte, handler requestHandler) map[
 		"push.finalize": handlePushFinalize,
 		"pull.prepare":  handlePullPrepare,
 		"pull.finalize": handlePullFinalize,
+		"lock.report":   handleLockReport,
 		"runs.sync":     handleRunsSync,
 		"auth.login":    handleAuthLogin,
 		"auth.whoami":   handleAuthWhoami,
@@ -174,7 +177,7 @@ func dispatchRequest(base baseRequest, data []byte, handler requestHandler) map[
 }
 
 func handlePushPrepare(requestID string, data []byte, handler requestHandler) map[string]any {
-	var req componentsdk.PushPrepareRequest
+	var req remote.PushPrepareRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return errorResponse(requestID, "invalid_request", "failed to parse push.prepare request")
 	}
@@ -186,7 +189,7 @@ func handlePushPrepare(requestID string, data []byte, handler requestHandler) ma
 }
 
 func handlePushFinalize(requestID string, data []byte, handler requestHandler) map[string]any {
-	var req componentsdk.PushFinalizeRequest
+	var req remote.PushFinalizeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return errorResponse(requestID, "invalid_request", "failed to parse push.finalize request")
 	}
@@ -219,6 +222,18 @@ func handlePullFinalize(requestID string, data []byte, handler requestHandler) m
 		return remoteErrorResponse(requestID, err)
 	}
 	return successResponse(requestID, "pull.finalize.result", resp)
+}
+
+func handleLockReport(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.LockReportRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse lock.report request")
+	}
+	resp, err := handler.LockReport(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "lock.report.result", resp)
 }
 
 func handleRunsSync(requestID string, data []byte, handler requestHandler) map[string]any {

@@ -295,17 +295,17 @@ func TestPushPrepare_ExistingPackSkipsUploadAndPreservesMetadata(t *testing.T) {
 	client := locktivity.NewClientWithHTTP(server.Client(), server.URL())
 	handler := NewHandlerWithClient(client, nil)
 
-	resp, err := handler.PushPrepare(componentsdk.PushPrepareRequest{
+	resp, err := handler.PushPrepare(PushPrepareRequest{
 		RequestID: "req_123",
-		Target: componentsdk.RemoteTarget{
+		Target: RemoteTarget{
 			Environment: "prod",
 		},
-		Pack: componentsdk.PackInfo{
+		Pack: PackInfo{
 			Digest:     "sha256:pack",
 			FileDigest: "sha256:file",
 			SizeBytes:  123,
 		},
-		Release: componentsdk.ReleaseInfo{
+		Release: ReleaseInfo{
 			Version:      "1.2.3",
 			Notes:        "release notes",
 			Labels:       []string{"prod", "monthly"},
@@ -367,7 +367,7 @@ func TestPushFinalize_RetriesAcceptedAndSucceeds(t *testing.T) {
 
 	token := mustEncodePushFinalizeToken(t, handler, "nonce-accepted")
 
-	resp, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	resp, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: token,
 	})
@@ -473,7 +473,7 @@ func TestPushFinalize_RetriesRateLimitedAndSucceeds(t *testing.T) {
 
 	token := mustEncodePushFinalizeToken(t, handler, "nonce-rate-limit")
 
-	resp, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	resp, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: token,
 	})
@@ -504,12 +504,12 @@ func TestPushPrepare_MapsUnauthorizedToAuthRequired(t *testing.T) {
 	client := locktivity.NewClientWithHTTP(server.Client(), server.URL())
 	handler := NewHandlerWithClient(client, nil)
 
-	_, err := handler.PushPrepare(componentsdk.PushPrepareRequest{
+	_, err := handler.PushPrepare(PushPrepareRequest{
 		RequestID: "req_123",
-		Target: componentsdk.RemoteTarget{
+		Target: RemoteTarget{
 			Environment: "prod",
 		},
-		Pack: componentsdk.PackInfo{
+		Pack: PackInfo{
 			Digest:     "sha256:pack",
 			FileDigest: "sha256:file",
 			SizeBytes:  123,
@@ -544,7 +544,7 @@ func TestPushFinalize_MapsFinalizeRedemptionDeniedToForbidden(t *testing.T) {
 	client := locktivity.NewClientWithHTTP(server.Client(), server.URL())
 	handler := NewHandlerWithClient(client, nil)
 
-	_, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	_, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: mustEncodePushFinalizeToken(t, handler, "nonce-denied"),
 	})
@@ -577,7 +577,7 @@ func TestPushFinalize_MapsFinalizeConflictToConflict(t *testing.T) {
 	client := locktivity.NewClientWithHTTP(server.Client(), server.URL())
 	handler := NewHandlerWithClient(client, nil)
 
-	_, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	_, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: mustEncodePushFinalizeToken(t, handler, "nonce-conflict"),
 	})
@@ -618,7 +618,7 @@ func TestPushFinalize_ReturnsServerErrorAfterAcceptedRetriesExhausted(t *testing
 		waits = append(waits, wait)
 	}
 
-	_, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	_, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: mustEncodePushFinalizeToken(t, handler, "nonce-accepted-timeout"),
 	})
@@ -668,7 +668,7 @@ func TestPushFinalize_ReturnsRateLimitedAfterRetryBudgetExhausted(t *testing.T) 
 		waits = append(waits, wait)
 	}
 
-	_, err := handler.PushFinalize(componentsdk.PushFinalizeRequest{
+	_, err := handler.PushFinalize(PushFinalizeRequest{
 		RequestID:     "req_123",
 		FinalizeToken: mustEncodePushFinalizeToken(t, handler, "nonce-rate-limit-budget"),
 	})
