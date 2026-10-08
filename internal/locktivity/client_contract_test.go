@@ -617,6 +617,44 @@ func TestRegisterSigningKey_SendsMachineAndReturnsApproval(t *testing.T) {
 	}
 }
 
+func TestResolveCredentialSets_PostsToTheBrokerAndReturnsTheEnv(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   CredentialBrokerPath,
+		Status: http.StatusOK,
+		Body:   `{"env": {"LOCKTIVITY_DOCUMENTS_TOKEN": "tok_docs"}, "expires_at": "2026-10-08T19:00:00Z"}`,
+		Check: func(t *testing.T, _ *http.Request, body []byte) {
+			if string(body) != `{"credential_sets":["credset_docs"],"pipeline_id":"pipe_1"}` {
+				t.Errorf("unexpected request body: %s", body)
+			}
+		},
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.ResolveCredentialSets(context.Background(), ResolveCredentialSetsRequest{CredentialSets: []string{"credset_docs"}, PipelineID: "pipe_1"})
+	if err != nil {
+		t.Fatalf("ResolveCredentialSets failed: %v", err)
+	}
+	if resp.Env["LOCKTIVITY_DOCUMENTS_TOKEN"] != "tok_docs" || resp.ExpiresAt != "2026-10-08T19:00:00Z" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestResolveCredentialSets_NamesTheStatusOfARefusalWithNoCode(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   CredentialBrokerPath,
+		Status: http.StatusUnauthorized,
+		Body:   `{"error": "Invalid token"}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	_, err := client.ResolveCredentialSets(context.Background(), ResolveCredentialSetsRequest{CredentialSets: []string{"credset_docs"}, PipelineID: "pipe_1"})
+	if err == nil || err.Error() != "API error [unauthorized]: Invalid token" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestListSigningKeys_ReturnsMachineWithoutApproval(t *testing.T) {
 	server := contracttest.NewServer(t, contracttest.Step{
 		Method: http.MethodGet,

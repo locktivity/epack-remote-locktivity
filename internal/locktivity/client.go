@@ -50,6 +50,9 @@ type Client interface {
 	ListSigningKeys(ctx context.Context, pipeline string) (*SigningKeysResponse, error)
 	RevokeSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error)
 	RetireSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error)
+
+	// Credential broker, for a signed-in person on a pipeline that runs on a laptop
+	ResolveCredentialSets(ctx context.Context, req ResolveCredentialSetsRequest) (*ResolvedCredentials, error)
 }
 
 // APIClient implements the Client interface.
@@ -352,6 +355,16 @@ func (c *APIClient) GetPipelineBundle(ctx context.Context, name string) (*Pipeli
 	return &resp, nil
 }
 
+// ResolveCredentialSets asks the credential broker for a pipeline's
+// Locktivity-managed credentials with this client's token.
+func (c *APIClient) ResolveCredentialSets(ctx context.Context, req ResolveCredentialSetsRequest) (*ResolvedCredentials, error) {
+	var resp ResolvedCredentials
+	if err := c.doJSON(ctx, http.MethodPost, CredentialBrokerPath, req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ErrAccepted is returned when the server responds with 202 Accepted,
 // indicating the request was accepted but processing is not complete.
 // Callers should retry the request.
@@ -502,6 +515,12 @@ func (c *APIClient) handleRateLimitResponse(resp *http.Response) error {
 func (c *APIClient) handleErrorResponse(resp *http.Response) error {
 	var apiErr APIError
 	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil {
+		// The credential broker answers with only an error message, so its
+		// status supplies the code a caller maps to sign in again, forbidden,
+		// or not found.
+		if apiErr.Code == "" {
+			apiErr.Code = statusCodes[resp.StatusCode]
+		}
 		if apiErr.Code != "" {
 			return fmt.Errorf("API error [%s]: %s", apiErr.Code, apiErr.ErrorString())
 		}
@@ -510,6 +529,12 @@ func (c *APIClient) handleErrorResponse(resp *http.Response) error {
 		}
 	}
 	return fmt.Errorf("API returned status %d", resp.StatusCode)
+}
+
+var statusCodes = map[int]string{
+	http.StatusUnauthorized: "unauthorized",
+	http.StatusForbidden:    "forbidden",
+	http.StatusNotFound:     "not_found",
 }
 
 // UploadToPresignedURL uploads content to a presigned URL.

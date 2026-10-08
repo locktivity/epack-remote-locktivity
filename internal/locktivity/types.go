@@ -240,6 +240,19 @@ func (e APIError) ErrorString() string {
 	return e.Error
 }
 
+// ResolveCredentialSetsRequest asks the credential broker for a pipeline's
+// Locktivity-managed credentials.
+type ResolveCredentialSetsRequest struct {
+	CredentialSets []string `json:"credential_sets"`
+	PipelineID     string   `json:"pipeline_id,omitempty"`
+}
+
+// ResolvedCredentials is the env the broker hands a component.
+type ResolvedCredentials struct {
+	Env       map[string]string `json:"env"`
+	ExpiresAt string            `json:"expires_at,omitempty"`
+}
+
 // RegisterSigningKeyRequest asks a pipeline to accept a signing key.
 type RegisterSigningKeyRequest struct {
 	PublicKeyPEM string `json:"public_key_pem"`

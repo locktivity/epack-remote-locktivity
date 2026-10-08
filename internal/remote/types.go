@@ -341,3 +341,22 @@ type KeyRetireResponse struct {
 	RequestID string     `json:"request_id"`
 	Key       SigningKey `json:"key"`
 }
+
+// CredentialsResolveRequest asks for a pipeline's Locktivity-managed
+// credentials with this machine's sign-in.
+type CredentialsResolveRequest struct {
+	Type           string   `json:"type"`
+	RequestID      string   `json:"request_id"`
+	Config         string   `json:"config,omitempty"`
+	CredentialSets []string `json:"credential_sets"`
+}
+
+// CredentialsResolveResponse carries the env a component receives, never
+// the sign-in itself.
+type CredentialsResolveResponse struct {
+	OK        bool              `json:"ok"`
+	Type      string            `json:"type"`
+	RequestID string            `json:"request_id"`
+	Env       map[string]string `json:"env"`
+	ExpiresAt string            `json:"expires_at,omitempty"`
+}

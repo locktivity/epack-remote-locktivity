@@ -1169,6 +1169,29 @@ func (h *Handler) KeyRetire(req KeyRetireRequest) (*KeyRetireResponse, error) {
 	return &KeyRetireResponse{OK: true, Type: "key.retire.result", RequestID: req.RequestID, Key: signingKeyFrom(*resp)}, nil
 }
 
+// CredentialsResolve gets a pipeline's Locktivity-managed credentials from
+// the broker with this machine's sign-in, for a run with no CI identity. The
+// sign-in never leaves the adapter; only the credentials it resolves do.
+func (h *Handler) CredentialsResolve(req CredentialsResolveRequest) (*CredentialsResolveResponse, error) {
+	ctx := context.Background()
+	pipeline := pipelineFor(req.Config)
+	if pipeline == "" || len(req.CredentialSets) == 0 {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "credentials.resolve needs a configuration and credential sets"}
+	}
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	resp, err := client.ResolveCredentialSets(ctx, locktivity.ResolveCredentialSetsRequest{CredentialSets: req.CredentialSets, PipelineID: pipeline})
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	return &CredentialsResolveResponse{OK: true, Type: "credentials.resolve.result", RequestID: req.RequestID, Env: resp.Env, ExpiresAt: resp.ExpiresAt}, nil
+}
+
 // ProjectRootEnvVar is where epack says the project folder is when a
 // command runs inside one.
 const ProjectRootEnvVar = "EPACK_PROJECT_ROOT"

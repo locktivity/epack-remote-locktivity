@@ -45,6 +45,8 @@ type MockClient struct {
 	RevokeSigningKeyError          error
 	RetireSigningKeyResponse       *SigningKeyResponse
 	RetireSigningKeyError          error
+	ResolveCredentialSetsResponse  *ResolvedCredentials
+	ResolveCredentialSetsError     error
 
 	// Call tracking
 	CreatePackCalls             []CreatePackRequest
@@ -63,6 +65,7 @@ type MockClient struct {
 	ListSigningKeysCalls        []string
 	RevokeSigningKeyCalls       []SigningKeyCall
 	RetireSigningKeyCalls       []SigningKeyCall
+	ResolveCredentialSetsCalls  []ResolveCredentialSetsRequest
 	GetIdentityCalls            int
 	GetPipelineBundleCalls      []string
 	UploadCalls                 []UploadCall
@@ -340,6 +343,14 @@ func (m *MockClient) ListSigningKeys(ctx context.Context, pipeline string) (*Sig
 		return nil, m.ListSigningKeysError
 	}
 	return m.ListSigningKeysResponse, nil
+}
+
+func (m *MockClient) ResolveCredentialSets(ctx context.Context, req ResolveCredentialSetsRequest) (*ResolvedCredentials, error) {
+	m.ResolveCredentialSetsCalls = append(m.ResolveCredentialSetsCalls, req)
+	if m.ResolveCredentialSetsError != nil {
+		return nil, m.ResolveCredentialSetsError
+	}
+	return m.ResolveCredentialSetsResponse, nil
 }
 
 func (m *MockClient) RevokeSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error) {

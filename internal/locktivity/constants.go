@@ -33,6 +33,10 @@ const (
 	OAuthSignInTokenEndpoint = "/epack/oauth2/token"
 	BrowserSignInLifetime    = 10 * time.Minute
 
+	// CredentialBrokerPath resolves a pipeline's Locktivity-managed
+	// credentials. It is on the API host, outside APIPathPrefix.
+	CredentialBrokerPath = "/oidc/v1/credential_sets/resolve"
+
 	// PublicClientID is the public OAuth client every epack install signs in through.
 	PublicClientID = "epack"
 )

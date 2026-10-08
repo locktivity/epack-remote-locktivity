@@ -30,6 +30,7 @@ type requestHandler interface {
 	KeyList(req remote.KeyListRequest) (*remote.KeyListResponse, error)
 	KeyRevoke(req remote.KeyRevokeRequest) (*remote.KeyRevokeResponse, error)
 	KeyRetire(req remote.KeyRetireRequest) (*remote.KeyRetireResponse, error)
+	CredentialsResolve(req remote.CredentialsResolveRequest) (*remote.CredentialsResolveResponse, error)
 }
 
 func main() {
@@ -125,6 +126,8 @@ func buildCapabilities() (map[string]any, error) {
 			"whoami":           true,
 			"config_pull":      true,
 			"keys":             true,
+			// The broker resolves credentials only for a person's sign-in.
+			"credentials_resolve": authLoginEnabled,
 		},
 		"files_dir": ".locktivity",
 		"auth": map[string]any{
@@ -184,6 +187,8 @@ func dispatchRequest(base baseRequest, data []byte, handler requestHandler) map[
 		"key.list":      handleKeyList,
 		"key.revoke":    handleKeyRevoke,
 		"key.retire":    handleKeyRetire,
+
+		"credentials.resolve": handleCredentialsResolve,
 	}
 	fn, ok := dispatch[base.Type]
 	if !ok {
@@ -298,6 +303,18 @@ func handleKeyRetire(requestID string, data []byte, handler requestHandler) map[
 		return remoteErrorResponse(requestID, err)
 	}
 	return successResponse(requestID, "key.retire.result", resp)
+}
+
+func handleCredentialsResolve(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.CredentialsResolveRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse credentials.resolve request")
+	}
+	resp, err := handler.CredentialsResolve(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "credentials.resolve.result", resp)
 }
 
 func handleRunsSync(requestID string, data []byte, handler requestHandler) map[string]any {

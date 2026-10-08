@@ -1209,6 +1209,45 @@ func TestKeyListAndRevoke(t *testing.T) {
 	}
 }
 
+func TestCredentialsResolve_ResolvesTheConfigurationsSetsWithTheSignIn(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.ResolveCredentialSetsResponse = &locktivity.ResolvedCredentials{
+		Env:       map[string]string{"LOCKTIVITY_DOCUMENTS_TOKEN": "tok_docs"},
+		ExpiresAt: "2026-10-08T19:00:00Z",
+	}
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.CredentialsResolve(CredentialsResolveRequest{RequestID: "req_1", Config: "pipe_1", CredentialSets: []string{"credset_docs"}})
+	if err != nil {
+		t.Fatalf("CredentialsResolve: %v", err)
+	}
+	if resp.Type != "credentials.resolve.result" || resp.Env["LOCKTIVITY_DOCUMENTS_TOKEN"] != "tok_docs" || resp.ExpiresAt != "2026-10-08T19:00:00Z" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	call := mockClient.ResolveCredentialSetsCalls[0]
+	if call.PipelineID != "pipe_1" || len(call.CredentialSets) != 1 || call.CredentialSets[0] != "credset_docs" {
+		t.Fatalf("unexpected broker call: %+v", call)
+	}
+}
+
+func TestCredentialsResolve_NeedsAConfigurationAndAsksForASignInWhenRefused(t *testing.T) {
+	t.Setenv(ProjectRootEnvVar, t.TempDir())
+	mockClient := locktivity.NewMockClient()
+	mockClient.ResolveCredentialSetsError = errors.New("API error [unauthorized]: Invalid token")
+	handler := &Handler{client: mockClient}
+
+	_, err := handler.CredentialsResolve(CredentialsResolveRequest{CredentialSets: []string{"credset_docs"}})
+	var remoteErr componentsdk.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr.Code != "invalid_request" {
+		t.Fatalf("a request naming no configuration should be invalid, got %v", err)
+	}
+
+	_, err = handler.CredentialsResolve(CredentialsResolveRequest{Config: "pipe_1", CredentialSets: []string{"credset_docs"}})
+	if !errors.As(err, &remoteErr) || remoteErr.Code != "auth_required" {
+		t.Fatalf("a refused sign-in should ask for a new one, got %v", err)
+	}
+}
+
 func TestKeyRetire(t *testing.T) {
 	mockClient := locktivity.NewMockClient()
 	mockClient.RetireSigningKeyResponse = &locktivity.SigningKeyResponse{ID: "key_1", Fingerprint: "9f14", Status: "retired", RetiredAt: "2026-10-07T18:05:00Z"}

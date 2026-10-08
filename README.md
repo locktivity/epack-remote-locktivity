@@ -116,6 +116,7 @@ The binary implements Remote Adapter Protocol v1 operations:
 | `auth.complete` | Finish a browser sign-in with the code the browser returned; stores the token and returns the identity |
 | `auth.whoami` | Return current identity status |
 | `config.pull` | Fetch a pipeline's generated files, shas, and revision by its config name |
+| `credentials.resolve` | Resolve a pipeline's Locktivity-managed credentials with the stored browser sign-in, for a run with no CI identity |
 
 All requests must include `protocol_version: 1`.
 

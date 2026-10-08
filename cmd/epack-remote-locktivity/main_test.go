@@ -146,6 +146,24 @@ func TestProcessRequest_LockReportSuccess(t *testing.T) {
 	}
 }
 
+func TestProcessRequest_CredentialsResolveReturnsTheEnv(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.ResolveCredentialSetsResponse = &locktivity.ResolvedCredentials{Env: map[string]string{"LOCKTIVITY_DOCUMENTS_TOKEN": "tok_docs"}}
+	handler := remote.NewHandlerWithClient(mockClient, nil)
+
+	resp := processRequest([]byte(`{"type":"credentials.resolve","request_id":"req_1","protocol_version":1,"config":"pipe_1","credential_sets":["credset_docs"]}`), handler)
+
+	if got := resp["ok"]; got != true {
+		t.Fatalf("expected ok=true, got %v", resp)
+	}
+	if got := resp["type"]; got != "credentials.resolve.result" {
+		t.Fatalf("expected credentials.resolve.result, got %v", got)
+	}
+	if env, _ := resp["env"].(map[string]any); env["LOCKTIVITY_DOCUMENTS_TOKEN"] != "tok_docs" {
+		t.Fatalf("unexpected env: %v", resp["env"])
+	}
+}
+
 func TestProcessRequest_ParseErrorsByOperation(t *testing.T) {
 	handler := remote.NewHandlerWithClient(locktivity.NewMockClient(), nil)
 
@@ -370,7 +388,7 @@ func TestBuildCapabilities_DefaultAutoMode(t *testing.T) {
 	}
 
 	features := caps["features"].(map[string]bool)
-	for _, feature := range []string{"auth_login", "auth_browser", "config_pull", "whoami", "keys"} {
+	for _, feature := range []string{"auth_login", "auth_browser", "config_pull", "whoami", "keys", "credentials_resolve"} {
 		if !features[feature] {
 			t.Fatalf("expected %s=true", feature)
 		}
@@ -450,6 +468,9 @@ func TestBuildCapabilities_ClientCredentialsOnlyMode(t *testing.T) {
 	if features["auth_login"] || features["auth_browser"] {
 		t.Fatal("expected auth_login=false and auth_browser=false")
 	}
+	if features["credentials_resolve"] {
+		t.Fatal("the broker resolves credentials only for a person's sign-in")
+	}
 	if _, ok := features["auth_wait"]; ok {
 		t.Fatal("auth_wait must not be advertised")
 	}
@@ -515,6 +536,10 @@ func (f fakeRequestHandler) KeyRegister(req remote.KeyRegisterRequest) (*remote.
 }
 
 func (f fakeRequestHandler) KeyList(req remote.KeyListRequest) (*remote.KeyListResponse, error) {
+	return nil, componentsdk.ErrServerError("not implemented")
+}
+
+func (f fakeRequestHandler) CredentialsResolve(req remote.CredentialsResolveRequest) (*remote.CredentialsResolveResponse, error) {
 	return nil, componentsdk.ErrServerError("not implemented")
 }
 
