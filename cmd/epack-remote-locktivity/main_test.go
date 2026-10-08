@@ -184,6 +184,16 @@ func TestProcessRequest_ParseErrorsByOperation(t *testing.T) {
 			payload: `{"type":"lock.report","request_id":"req_1","protocol_version":1,"lock_provenance":"oops"}`,
 			wantMsg: "failed to parse lock.report request",
 		},
+		{
+			name:    "auth.login",
+			payload: `{"type":"auth.login","request_id":"req_1","protocol_version":1,"redirect_uri":123}`,
+			wantMsg: "failed to parse auth.login request",
+		},
+		{
+			name:    "auth.complete",
+			payload: `{"type":"auth.complete","request_id":"req_1","protocol_version":1,"code":123}`,
+			wantMsg: "failed to parse auth.complete request",
+		},
 	}
 
 	for _, tt := range tests {
@@ -340,7 +350,7 @@ func TestRemoteErrorResponse_GenericErrorFallsBackToServerError(t *testing.T) {
 	}
 }
 
-func TestBuildCapabilities_DefaultClientCredentialsOnlyMode(t *testing.T) {
+func TestBuildCapabilities_DefaultAutoMode(t *testing.T) {
 	t.Setenv(locktivity.EnvAuthMode, "")
 
 	caps, err := buildCapabilities()
@@ -350,14 +360,74 @@ func TestBuildCapabilities_DefaultClientCredentialsOnlyMode(t *testing.T) {
 
 	auth := caps["auth"].(map[string]any)
 	modes := auth["modes"].([]string)
-	want := []string{"access_token", "client_credentials"}
+	want := []string{"access_token", "browser", "client_credentials"}
 	if !reflect.DeepEqual(modes, want) {
 		t.Fatalf("unexpected auth modes: %#v", modes)
 	}
 
+	if caps["files_dir"] != ".locktivity" {
+		t.Fatalf("the adapter must declare its bookkeeping folder, got %v", caps["files_dir"])
+	}
+
 	features := caps["features"].(map[string]bool)
-	if features["auth_login"] {
-		t.Fatal("expected auth_login=false")
+	for _, feature := range []string{"auth_login", "auth_browser", "config_pull", "whoami", "keys"} {
+		if !features[feature] {
+			t.Fatalf("expected %s=true", feature)
+		}
+	}
+	if _, ok := features["auth_wait"]; ok {
+		t.Fatal("auth_wait must not be advertised")
+	}
+}
+
+func TestProcessRequest_DispatchesBrowserSignInAndConfigPull(t *testing.T) {
+	handler := fakeRequestHandler{
+		authLogin: func(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error) {
+			if req.RedirectURI != "http://127.0.0.1:53682/callback" {
+				t.Fatalf("unexpected redirect_uri: %q", req.RedirectURI)
+			}
+			return &remote.AuthLoginResponse{OK: true, Type: "auth.login.result", RequestID: req.RequestID,
+				Instructions: remote.AuthLoginInstructions{AuthorizationURL: "https://app.locktivity.com/epack/oauth2/authorize?state=state_1", State: "state_1", Session: "session_1", ExpiresInSecs: 600}}, nil
+		},
+		authComplete: func(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error) {
+			if req.Session != "session_1" || req.Code != "code_1" || req.State != "state_1" {
+				t.Fatalf("unexpected auth.complete request: %#v", req)
+			}
+			return &remote.AuthCompleteResponse{OK: true, Type: "auth.complete.result", RequestID: req.RequestID,
+				Identity: remote.IdentityResult{Authenticated: true, Subject: "dana@northwind.com"}}, nil
+		},
+		configPull: func(req remote.ConfigPullRequest) (*remote.ConfigPullResponse, error) {
+			if req.Config.Name != "northwind-production" {
+				t.Fatalf("unexpected config name: %q", req.Config.Name)
+			}
+			return &remote.ConfigPullResponse{OK: true, Type: "config.pull.result", RequestID: req.RequestID,
+				Config: remote.ConfigPullResult{Name: req.Config.Name, Revision: 3, Files: map[string]string{"a/epack.yaml": "stream: a\n"}}}, nil
+		},
+	}
+
+	login := processRequest([]byte(`{"type":"auth.login","request_id":"req_1","protocol_version":1,"redirect_uri":"http://127.0.0.1:53682/callback"}`), handler)
+	if login["ok"] != true || login["type"] != "auth.login.result" || login["request_id"] != "req_1" {
+		t.Fatalf("unexpected auth.login response: %#v", login)
+	}
+	if instructions := login["instructions"].(remote.AuthLoginInstructions); instructions.State != "state_1" || instructions.Session != "session_1" {
+		t.Fatalf("unexpected auth.login instructions: %#v", instructions)
+	}
+
+	complete := processRequest([]byte(`{"type":"auth.complete","request_id":"req_2","protocol_version":1,"session":"session_1","code":"code_1","state":"state_1"}`), handler)
+	if complete["ok"] != true || complete["type"] != "auth.complete.result" || complete["request_id"] != "req_2" {
+		t.Fatalf("unexpected auth.complete response: %#v", complete)
+	}
+	if identity := complete["identity"].(remote.IdentityResult); !identity.Authenticated || identity.Subject != "dana@northwind.com" {
+		t.Fatalf("unexpected auth.complete identity: %#v", identity)
+	}
+
+	pull := processRequest([]byte(`{"type":"config.pull","request_id":"req_3","protocol_version":1,"config":{"name":"northwind-production"}}`), handler)
+	if pull["type"] != "config.pull.result" {
+		t.Fatalf("unexpected config.pull response: %#v", pull)
+	}
+	cfg := pull["config"].(remote.ConfigPullResult)
+	if cfg.Revision != 3 || cfg.Files["a/epack.yaml"] == "" {
+		t.Fatalf("unexpected config payload: %#v", cfg)
 	}
 }
 
@@ -377,8 +447,14 @@ func TestBuildCapabilities_ClientCredentialsOnlyMode(t *testing.T) {
 	}
 
 	features := caps["features"].(map[string]bool)
-	if features["auth_login"] {
-		t.Fatal("expected auth_login=false")
+	if features["auth_login"] || features["auth_browser"] {
+		t.Fatal("expected auth_login=false and auth_browser=false")
+	}
+	if _, ok := features["auth_wait"]; ok {
+		t.Fatal("auth_wait must not be advertised")
+	}
+	if !features["config_pull"] {
+		t.Fatal("expected config_pull=true")
 	}
 }
 
@@ -392,14 +468,14 @@ func TestBuildCapabilities_AllMode(t *testing.T) {
 
 	auth := caps["auth"].(map[string]any)
 	modes := auth["modes"].([]string)
-	want := []string{"access_token", "device_code", "client_credentials"}
+	want := []string{"access_token", "browser", "client_credentials"}
 	if !reflect.DeepEqual(modes, want) {
 		t.Fatalf("unexpected auth modes: %#v", modes)
 	}
 
 	features := caps["features"].(map[string]bool)
-	if !features["auth_login"] {
-		t.Fatal("expected auth_login=true")
+	if !features["auth_login"] || !features["auth_browser"] {
+		t.Fatal("expected auth_login=true and auth_browser=true")
 	}
 	if !features["lock_report"] {
 		t.Fatal("expected lock_report=true")
@@ -422,7 +498,39 @@ type fakeRequestHandler struct {
 	lockReport   func(req remote.LockReportRequest) (*remote.LockReportResponse, error)
 	runsSync     func(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	authLogin    func(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
+	authComplete func(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error)
 	authWhoami   func(req remote.AuthWhoamiRequest) (*remote.AuthWhoamiResponse, error)
+	configPull   func(req remote.ConfigPullRequest) (*remote.ConfigPullResponse, error)
+}
+
+func (f fakeRequestHandler) AuthComplete(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error) {
+	if f.authComplete != nil {
+		return f.authComplete(req)
+	}
+	return &remote.AuthCompleteResponse{}, nil
+}
+
+func (f fakeRequestHandler) KeyRegister(req remote.KeyRegisterRequest) (*remote.KeyRegisterResponse, error) {
+	return nil, componentsdk.ErrServerError("not implemented")
+}
+
+func (f fakeRequestHandler) KeyList(req remote.KeyListRequest) (*remote.KeyListResponse, error) {
+	return nil, componentsdk.ErrServerError("not implemented")
+}
+
+func (f fakeRequestHandler) KeyRevoke(req remote.KeyRevokeRequest) (*remote.KeyRevokeResponse, error) {
+	return nil, componentsdk.ErrServerError("not implemented")
+}
+
+func (f fakeRequestHandler) KeyRetire(req remote.KeyRetireRequest) (*remote.KeyRetireResponse, error) {
+	return nil, componentsdk.ErrServerError("not implemented")
+}
+
+func (f fakeRequestHandler) ConfigPull(req remote.ConfigPullRequest) (*remote.ConfigPullResponse, error) {
+	if f.configPull != nil {
+		return f.configPull(req)
+	}
+	return &remote.ConfigPullResponse{}, nil
 }
 
 func (f fakeRequestHandler) PushPrepare(req remote.PushPrepareRequest) (*componentsdk.PushPrepareResponse, error) {

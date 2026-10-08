@@ -69,6 +69,29 @@ func TestMemoryKeychain_Clear(t *testing.T) {
 	}
 }
 
+func TestOSKeychain_ClearingTheClientIDReportsAFailureButNotAMissingEntry(t *testing.T) {
+	// go-keyring cannot put the OS provider back, so later tests get a clean mock.
+	t.Cleanup(keyring.MockInit)
+	keyring.MockInit()
+	k := NewOSKeychain("https://app.locktivity.com")
+
+	if err := k.SetClientID(""); err != nil {
+		t.Fatalf("clearing a client ID that was never stored should succeed, got %v", err)
+	}
+	_ = k.SetClientID("client_A")
+	if err := k.SetClientID(""); err != nil {
+		t.Fatalf("clearing a stored client ID failed: %v", err)
+	}
+	if _, err := k.GetClientID(); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatalf("expected the client ID to be gone, got %v", err)
+	}
+
+	keyring.MockInitWithError(errors.New("keychain locked"))
+	if err := k.SetClientID(""); err == nil {
+		t.Fatal("a keychain that cannot delete the client ID must say so")
+	}
+}
+
 func TestKeyNamespace_FromAuthEndpoint(t *testing.T) {
 	ns := keyNamespace("https://app.locktivity.com")
 	if ns != "https|app.locktivity.com|443" {

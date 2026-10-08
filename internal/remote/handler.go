@@ -32,11 +32,6 @@ type Handler struct {
 
 	tokenKey []byte
 
-	loginMu         sync.Mutex
-	loginInProgress bool
-	loginCancel     context.CancelFunc
-	loginSeq        uint64
-
 	nonceMu    sync.Mutex
 	usedNonces map[string]int64
 
@@ -475,6 +470,7 @@ func (h *Handler) LockReport(req LockReportRequest) (*LockReportResponse, error)
 		Outcome:        reportResp.Outcome,
 		LockfileSHA256: reportResp.LockfileSHA256,
 		RevisionID:     reportResp.RevisionID,
+		PipelineURL:    reportResp.PipelineURL,
 	}, nil
 }
 
@@ -483,7 +479,7 @@ func lockfileReportRequest(provenance LockProvenance) locktivity.CreateLockfileR
 	repoOwner, repoName := splitRepository(github["repository"])
 	ref := github["ref"]
 	return locktivity.CreateLockfileReportRequest{
-		PipelineID:     stringValue(provenance.RuntimeContext["pipeline_id"]),
+		PipelineID:     pipelineFor(stringValue(provenance.RuntimeContext["pipeline_id"])),
 		RepoOwner:      repoOwner,
 		RepoName:       repoName,
 		Branch:         branchFromRef(ref),
@@ -1003,54 +999,269 @@ func computeMD5Checksum(path string) (string, error) {
 	return base64.StdEncoding.EncodeToString(sum[:]), nil
 }
 
-// AuthLogin handles auth.login requests.
+// AuthLogin handles auth.login requests: it starts a browser sign-in that
+// returns to epack's loopback address. Each adapter process serves one
+// command, so the session it hands back carries everything auth.complete
+// needs to finish.
 func (h *Handler) AuthLogin(req AuthLoginRequest) (*AuthLoginResponse, error) {
 	if !h.allowRateLimited("auth.login", authLoginMinInterval) {
 		return nil, componentsdk.ErrRateLimited("auth.login rate limit exceeded")
 	}
 
-	ctx := context.Background()
-
-	h.loginMu.Lock()
-	if h.loginCancel != nil {
-		h.loginCancel()
-		h.loginCancel = nil
-	}
-	h.loginInProgress = false
-	h.loginMu.Unlock()
-
-	deviceResp, err := h.oauth.StartDeviceCodeFlow(ctx)
+	signIn, err := h.oauth.StartBrowserSignIn(req.RedirectURI)
 	if err != nil {
+		var requestErr *auth.SignInRequestError
+		if errors.As(err, &requestErr) {
+			return nil, componentsdk.RemoteError{Code: "invalid_request", Message: err.Error()}
+		}
 		return nil, err
 	}
-
-	loginCtx, cancel := context.WithTimeout(context.Background(), time.Duration(deviceResp.ExpiresIn)*time.Second)
-	h.loginMu.Lock()
-	h.loginSeq++
-	seq := h.loginSeq
-	h.loginCancel = cancel
-	h.loginInProgress = true
-	h.loginMu.Unlock()
-
-	go func(deviceCode string, interval int, loginSeq uint64, cancelFn context.CancelFunc) {
-		defer cancelFn()
-		_ = h.oauth.CompleteDeviceCodeFlow(loginCtx, deviceCode, interval)
-		h.loginMu.Lock()
-		if h.loginSeq == loginSeq {
-			h.loginCancel = nil
-		}
-		h.loginInProgress = false
-		h.loginMu.Unlock()
-	}(deviceResp.DeviceCode, deviceResp.Interval, seq, cancel)
 
 	return &AuthLoginResponse{
 		OK:        true,
 		Type:      "auth.login.result",
 		RequestID: req.RequestID,
 		Instructions: AuthLoginInstructions{
-			UserCode:        deviceResp.UserCode,
-			VerificationURI: deviceResp.VerificationURI,
-			ExpiresInSecs:   deviceResp.ExpiresIn,
+			AuthorizationURL: signIn.AuthorizationURL,
+			State:            signIn.State,
+			Session:          signIn.Session,
+			ExpiresInSecs:    int(signIn.ExpiresIn / time.Second),
+		},
+	}, nil
+}
+
+// AuthComplete handles auth.complete requests: it exchanges the code the
+// browser brought back, stores the session, and confirms the identity through
+// the same path whoami uses.
+func (h *Handler) AuthComplete(req AuthCompleteRequest) (*AuthCompleteResponse, error) {
+	if req.Session == "" || req.Code == "" || req.State == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "auth.complete needs the session from auth.login and the code and state from the browser"}
+	}
+
+	if err := h.oauth.CompleteBrowserSignIn(context.Background(), req.Session, req.Code, req.State); err != nil {
+		var requestErr *auth.SignInRequestError
+		if errors.As(err, &requestErr) {
+			return nil, componentsdk.RemoteError{Code: "invalid_request", Message: err.Error()}
+		}
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	// The token is already stored, so a failed identity lookup only leaves
+	// out the subject.
+	identity := IdentityResult{Authenticated: true}
+	if whoami, err := h.AuthWhoami(AuthWhoamiRequest{RequestID: req.RequestID}); err == nil && whoami.Identity.Authenticated {
+		identity = whoami.Identity
+	}
+	return &AuthCompleteResponse{
+		OK:        true,
+		Type:      "auth.complete.result",
+		RequestID: req.RequestID,
+		Identity:  identity,
+	}, nil
+}
+
+// KeyRegister handles key.register requests: a signed-in person asks a
+// pipeline to accept a signing key. The server decides whether they may. A
+// pending key comes back with its approval, which key.list never carries.
+func (h *Handler) KeyRegister(req KeyRegisterRequest) (*KeyRegisterResponse, error) {
+	ctx := context.Background()
+	pipeline := pipelineFor(req.Config)
+	if pipeline == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "key.register needs a configuration"}
+	}
+	if strings.TrimSpace(req.PublicKeyPEM) == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "key.register needs a public key"}
+	}
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	resp, err := client.RegisterSigningKey(ctx, pipeline, locktivity.RegisterSigningKeyRequest{
+		PublicKeyPEM: req.PublicKeyPEM,
+		Name:         req.Name,
+		LifetimeDays: req.ExpiresInDays,
+	})
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	key := signingKeyFrom(*resp)
+	if a := resp.Approval; a != nil {
+		key.Approval = &KeyApproval{Code: a.Code, URL: a.URL, ExpiresAt: a.ExpiresAt, Interval: a.Interval}
+	}
+
+	return &KeyRegisterResponse{
+		OK:          true,
+		Type:        "key.register.result",
+		RequestID:   req.RequestID,
+		Key:         key,
+		Created:     resp.Created,
+		PipelineURL: resp.PipelineURL,
+	}, nil
+}
+
+// KeyList handles key.list requests.
+func (h *Handler) KeyList(req KeyListRequest) (*KeyListResponse, error) {
+	ctx := context.Background()
+	pipeline := pipelineFor(req.Config)
+	if pipeline == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "key.list needs a configuration"}
+	}
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	resp, err := client.ListSigningKeys(ctx, pipeline)
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	keys := make([]SigningKey, 0, len(resp.SigningKeys))
+	for _, key := range resp.SigningKeys {
+		keys = append(keys, signingKeyFrom(key))
+	}
+	return &KeyListResponse{OK: true, Type: "key.list.result", RequestID: req.RequestID, Keys: keys}, nil
+}
+
+// KeyRevoke handles key.revoke requests.
+func (h *Handler) KeyRevoke(req KeyRevokeRequest) (*KeyRevokeResponse, error) {
+	ctx := context.Background()
+	pipeline := pipelineFor(req.Config)
+	if pipeline == "" || strings.TrimSpace(req.ID) == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "key.revoke needs a configuration and a key id"}
+	}
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	resp, err := client.RevokeSigningKey(ctx, pipeline, req.ID)
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	return &KeyRevokeResponse{OK: true, Type: "key.revoke.result", RequestID: req.RequestID, Key: signingKeyFrom(*resp)}, nil
+}
+
+// KeyRetire handles key.retire requests.
+func (h *Handler) KeyRetire(req KeyRetireRequest) (*KeyRetireResponse, error) {
+	ctx := context.Background()
+	pipeline := pipelineFor(req.Config)
+	if pipeline == "" || strings.TrimSpace(req.ID) == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "key.retire needs a configuration and a key id"}
+	}
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	resp, err := client.RetireSigningKey(ctx, pipeline, req.ID)
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	return &KeyRetireResponse{OK: true, Type: "key.retire.result", RequestID: req.RequestID, Key: signingKeyFrom(*resp)}, nil
+}
+
+// ProjectRootEnvVar is where epack says the project folder is when a
+// command runs inside one.
+const ProjectRootEnvVar = "EPACK_PROJECT_ROOT"
+
+// bundleManifestPath is the file a downloaded bundle carries that names the
+// pipeline it was generated for.
+const bundleManifestPath = ".locktivity/manifest.json"
+
+// pipelineFor is the pipeline a request means: the configuration it named,
+// or the one a bundle laid out by hand names in its manifest.
+func pipelineFor(config string) string {
+	if name := strings.TrimSpace(config); name != "" {
+		return name
+	}
+	return bundlePipelineID()
+}
+
+func bundlePipelineID() string {
+	root := strings.TrimSpace(os.Getenv(ProjectRootEnvVar))
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		root = cwd
+	}
+	raw, err := os.ReadFile(filepath.Join(root, bundleManifestPath))
+	if err != nil {
+		return ""
+	}
+	var manifest struct {
+		PipelineID string `json:"pipeline_id"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(manifest.PipelineID)
+}
+
+func signingKeyFrom(key locktivity.SigningKeyResponse) SigningKey {
+	return SigningKey{
+		ID:           key.ID,
+		Name:         key.Name,
+		Fingerprint:  key.Fingerprint,
+		Algorithm:    key.Algorithm,
+		Status:       key.Status,
+		RegisteredBy: key.RegisteredBy,
+		CreatedAt:    key.CreatedAt,
+		ExpiresAt:    key.ExpiresAt,
+		RevokedAt:    key.RevokedAt,
+		RetiredAt:    key.RetiredAt,
+		Machine:      key.Machine,
+	}
+}
+
+// ConfigPull handles config.pull requests: the generated files of a pipeline,
+// fetched with the stored session or the credentials in the environment.
+func (h *Handler) ConfigPull(req ConfigPullRequest) (*ConfigPullResponse, error) {
+	name := strings.TrimSpace(req.Config.Name)
+	if name == "" {
+		return nil, componentsdk.RemoteError{Code: "invalid_request", Message: "config.pull needs the pipeline name, as in epack run <name>"}
+	}
+
+	ctx := context.Background()
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	bundle, err := client.GetPipelineBundle(ctx, name)
+	if err != nil {
+		remoteErr := toRemoteError(err)
+		if remoteErr.Code == "not_found" {
+			remoteErr.Message = fmt.Sprintf("no pipeline named %q that you can run from here. The name is shown on the pipeline page as epack run <name>.", name)
+		}
+		return nil, remoteErr
+	}
+
+	return &ConfigPullResponse{
+		OK:        true,
+		Type:      "config.pull.result",
+		RequestID: req.RequestID,
+		Config: ConfigPullResult{
+			ID:       bundle.ID,
+			Name:     bundle.ConfigName,
+			Title:    bundle.Name,
+			Stream:   bundle.Stream,
+			RunsIn:   bundle.RunsIn,
+			Revision: bundle.Revision,
+			Folder:   bundle.Folder,
+			Files:    bundle.Files,
+			Shas:     bundle.Shas,
+			Lockfile: bundle.Lockfile,
 		},
 	}, nil
 }

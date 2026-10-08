@@ -35,6 +35,16 @@ type MockClient struct {
 	ConfirmRunOutputUploadError    error
 	GetIdentityResponse            *IdentityResponse
 	GetIdentityError               error
+	GetPipelineBundleResponse      *PipelineBundleResponse
+	GetPipelineBundleError         error
+	RegisterSigningKeyResponse     *SigningKeyResponse
+	RegisterSigningKeyError        error
+	ListSigningKeysResponse        *SigningKeysResponse
+	ListSigningKeysError           error
+	RevokeSigningKeyResponse       *SigningKeyResponse
+	RevokeSigningKeyError          error
+	RetireSigningKeyResponse       *SigningKeyResponse
+	RetireSigningKeyError          error
 
 	// Call tracking
 	CreatePackCalls             []CreatePackRequest
@@ -49,7 +59,12 @@ type MockClient struct {
 	GetDigestReleaseCalls       []GetDigestReleaseCall
 	SyncRunsCalls               []CreatePackRunsRequest
 	ConfirmRunOutputUploadCalls []ConfirmRunOutputUploadCall
+	RegisterSigningKeyCalls     []RegisterSigningKeyCall
+	ListSigningKeysCalls        []string
+	RevokeSigningKeyCalls       []SigningKeyCall
+	RetireSigningKeyCalls       []SigningKeyCall
 	GetIdentityCalls            int
+	GetPipelineBundleCalls      []string
 	UploadCalls                 []UploadCall
 }
 
@@ -263,6 +278,14 @@ func (m *MockClient) GetIdentity(ctx context.Context) (*IdentityResponse, error)
 	return m.GetIdentityResponse, nil
 }
 
+func (m *MockClient) GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error) {
+	m.GetPipelineBundleCalls = append(m.GetPipelineBundleCalls, name)
+	if m.GetPipelineBundleError != nil {
+		return nil, m.GetPipelineBundleError
+	}
+	return m.GetPipelineBundleResponse, nil
+}
+
 func (m *MockClient) UploadToPresignedURL(ctx context.Context, uploadURL string, headers map[string]string, content io.Reader) error {
 	data, _ := io.ReadAll(content)
 	m.UploadCalls = append(m.UploadCalls, UploadCall{
@@ -289,4 +312,48 @@ func (m *MockClient) ConfirmRunOutputUpload(ctx context.Context, outputID string
 		Path:       "output.json",
 		ScanStatus: "clean",
 	}, nil
+}
+
+// RegisterSigningKeyCall records one RegisterSigningKey call.
+type RegisterSigningKeyCall struct {
+	Pipeline string
+	Request  RegisterSigningKeyRequest
+}
+
+// SigningKeyCall records one call about a pipeline's key.
+type SigningKeyCall struct {
+	Pipeline string
+	ID       string
+}
+
+func (m *MockClient) RegisterSigningKey(ctx context.Context, pipeline string, req RegisterSigningKeyRequest) (*SigningKeyResponse, error) {
+	m.RegisterSigningKeyCalls = append(m.RegisterSigningKeyCalls, RegisterSigningKeyCall{Pipeline: pipeline, Request: req})
+	if m.RegisterSigningKeyError != nil {
+		return nil, m.RegisterSigningKeyError
+	}
+	return m.RegisterSigningKeyResponse, nil
+}
+
+func (m *MockClient) ListSigningKeys(ctx context.Context, pipeline string) (*SigningKeysResponse, error) {
+	m.ListSigningKeysCalls = append(m.ListSigningKeysCalls, pipeline)
+	if m.ListSigningKeysError != nil {
+		return nil, m.ListSigningKeysError
+	}
+	return m.ListSigningKeysResponse, nil
+}
+
+func (m *MockClient) RevokeSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error) {
+	m.RevokeSigningKeyCalls = append(m.RevokeSigningKeyCalls, SigningKeyCall{Pipeline: pipeline, ID: id})
+	if m.RevokeSigningKeyError != nil {
+		return nil, m.RevokeSigningKeyError
+	}
+	return m.RevokeSigningKeyResponse, nil
+}
+
+func (m *MockClient) RetireSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error) {
+	m.RetireSigningKeyCalls = append(m.RetireSigningKeyCalls, SigningKeyCall{Pipeline: pipeline, ID: id})
+	if m.RetireSigningKeyError != nil {
+		return nil, m.RetireSigningKeyError
+	}
+	return m.RetireSigningKeyResponse, nil
 }

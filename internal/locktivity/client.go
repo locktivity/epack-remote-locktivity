@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"unicode"
 )
 
 // Client defines the interface for Locktivity API operations.
@@ -40,6 +41,15 @@ type Client interface {
 
 	// Identity operations
 	GetIdentity(ctx context.Context) (*IdentityResponse, error)
+
+	// Pipeline operations
+	GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error)
+
+	// Signing key operations, for a signed-in person
+	RegisterSigningKey(ctx context.Context, pipeline string, req RegisterSigningKeyRequest) (*SigningKeyResponse, error)
+	ListSigningKeys(ctx context.Context, pipeline string) (*SigningKeysResponse, error)
+	RevokeSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error)
+	RetireSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error)
 }
 
 // APIClient implements the Client interface.
@@ -47,6 +57,32 @@ type APIClient struct {
 	httpClient  *http.Client
 	baseURL     string
 	accessToken string
+	machine     string
+}
+
+// MachineHeader names the machine the adapter runs on, so Locktivity can say
+// which laptop pulled a configuration or registered a signing key.
+const MachineHeader = "X-Epack-Machine"
+
+const machineNameMaxLength = 64
+
+// machineName is the hostname, printable characters only, bounded.
+func machineName() string {
+	host, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(host) {
+		if r < 0x20 || r == 0x7f || !unicode.IsPrint(r) {
+			continue
+		}
+		b.WriteRune(r)
+		if b.Len() >= machineNameMaxLength {
+			break
+		}
+	}
+	return b.String()
 }
 
 // Ensure APIClient implements Client.
@@ -66,6 +102,7 @@ func NewClient(baseURL, accessToken string) *APIClient {
 		},
 		baseURL:     baseURL,
 		accessToken: accessToken,
+		machine:     machineName(),
 	}
 }
 
@@ -74,6 +111,7 @@ func NewClientWithHTTP(httpClient *http.Client, baseURL string) *APIClient {
 	return &APIClient{
 		httpClient: httpClient,
 		baseURL:    strings.TrimSuffix(baseURL, "/"),
+		machine:    machineName(),
 	}
 }
 
@@ -157,6 +195,61 @@ func (c *APIClient) ReportLock(ctx context.Context, req CreateLockfileReportRequ
 
 	var resp LockfileReportResponse
 	if err := c.doJSON(ctx, http.MethodPost, path, createLockfileReportWrapper{LockfileReport: req}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// RegisterSigningKey asks a pipeline to accept a signing key. Registering
+// a key it already holds hands back that key with Created false.
+func (c *APIClient) RegisterSigningKey(ctx context.Context, pipeline string, req RegisterSigningKeyRequest) (*SigningKeyResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/signing_keys", APIPathPrefix, url.PathEscape(pipeline))
+
+	var resp SigningKeyResponse
+	if err := c.doJSON(ctx, http.MethodPost, path, registerSigningKeyWrapper{SigningKey: req}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ListSigningKeys lists every key a pipeline accepts, newest first. The API
+// pages the list, and a run looks for its own key in it, so every page is
+// read.
+func (c *APIClient) ListSigningKeys(ctx context.Context, pipeline string) (*SigningKeysResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/signing_keys", APIPathPrefix, url.PathEscape(pipeline))
+
+	all := &SigningKeysResponse{}
+	for page := 1; ; page++ {
+		var resp SigningKeysResponse
+		pagePath := fmt.Sprintf("%s?page=%d&per_page=%d", path, page, SigningKeysPerPage)
+		if err := c.doJSON(ctx, http.MethodGet, pagePath, nil, &resp); err != nil {
+			return nil, err
+		}
+		all.SigningKeys = append(all.SigningKeys, resp.SigningKeys...)
+		if resp.Pagination == nil || page >= resp.Pagination.LastPage {
+			return all, nil
+		}
+	}
+}
+
+// RevokeSigningKey stops a pipeline accepting a key.
+func (c *APIClient) RevokeSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/signing_keys/%s", APIPathPrefix, url.PathEscape(pipeline), url.PathEscape(id))
+
+	var resp SigningKeyResponse
+	if err := c.doJSON(ctx, http.MethodDelete, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// RetireSigningKey stops a pipeline accepting new signatures from a key,
+// as a rotation does. Packs the key already signed stay trusted.
+func (c *APIClient) RetireSigningKey(ctx context.Context, pipeline, id string) (*SigningKeyResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/signing_keys/%s/retirement", APIPathPrefix, url.PathEscape(pipeline), url.PathEscape(id))
+
+	var resp SigningKeyResponse
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -248,6 +341,17 @@ func (c *APIClient) GetIdentity(ctx context.Context) (*IdentityResponse, error) 
 	return &resp, nil
 }
 
+// GetPipelineBundle fetches the generated files of a pipeline by its config name or id.
+func (c *APIClient) GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/bundle", APIPathPrefix, url.PathEscape(name))
+
+	var resp PipelineBundleResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ErrAccepted is returned when the server responds with 202 Accepted,
 // indicating the request was accepted but processing is not complete.
 // Callers should retry the request.
@@ -320,6 +424,9 @@ func (c *APIClient) newJSONRequest(ctx context.Context, method, path string, bod
 func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("Accept", AcceptHeader)
 	req.Header.Set("Content-Type", ContentTypeHeader)
+	if c.machine != "" {
+		req.Header.Set(MachineHeader, c.machine)
+	}
 	if c.accessToken != "" {
 		req.Header.Set(AuthorizationHeader, "Bearer "+c.accessToken)
 	}

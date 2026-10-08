@@ -2,12 +2,18 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +52,11 @@ func NewOAuth(authURL string, keychain Keychain) *OAuth {
 		baseURL:  strings.TrimSuffix(authURL, "/"),
 		keychain: keychain,
 	}
+}
+
+// SetHTTPClient replaces the HTTP client, which tests use to fake the auth server.
+func (o *OAuth) SetHTTPClient(client *http.Client) {
+	o.httpClient = client
 }
 
 // SetClientCredentials sets the client ID and secret for client credentials flow.
@@ -252,14 +263,15 @@ func (o *OAuth) getUsableStoredToken(ctx context.Context) (string, bool) {
 }
 
 // doClientCredentialsGrant performs OAuth 2.0 client credentials grant.
+// No scope is requested: the token carries what the credential was granted,
+// and asking for a scope the application lacks fails the grant.
 func (o *OAuth) doClientCredentialsGrant(ctx context.Context, clientID, clientSecret string) (*locktivity.TokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"client_credentials"},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
-		"scope":         {"read:evidence_packs write:evidence_packs"},
 	}
-	return o.doTokenRequest(ctx, data)
+	return o.doTokenRequest(ctx, locktivity.OAuthTokenEndpoint, data)
 }
 
 // exchangeOIDCToken exchanges an OIDC token for a Locktivity access token.
@@ -271,7 +283,7 @@ func (o *OAuth) exchangeOIDCToken(ctx context.Context, oidcToken string) (string
 		"scope":              {"read:evidence_packs write:evidence_packs"},
 	}
 
-	tokenResp, err := o.doTokenRequest(ctx, data)
+	tokenResp, err := o.doTokenRequest(ctx, locktivity.OAuthTokenEndpoint, data)
 	if err != nil {
 		return "", err
 	}
@@ -279,8 +291,8 @@ func (o *OAuth) exchangeOIDCToken(ctx context.Context, oidcToken string) (string
 }
 
 // doTokenRequest performs a token endpoint request and returns the full response.
-func (o *OAuth) doTokenRequest(ctx context.Context, data url.Values) (*locktivity.TokenResponse, error) {
-	tokenURL := o.baseURL + locktivity.OAuthTokenEndpoint
+func (o *OAuth) doTokenRequest(ctx context.Context, endpoint string, data url.Values) (*locktivity.TokenResponse, error) {
+	tokenURL := o.baseURL + endpoint
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
@@ -363,163 +375,186 @@ func (o *OAuth) isStoredTokenExpired() bool {
 	return time.Now().Unix() >= exp-tokenExpiryLeewaySeconds
 }
 
-// StartDeviceCodeFlow initiates the device code flow and returns the user code and URI.
-func (o *OAuth) StartDeviceCodeFlow(ctx context.Context) (*locktivity.DeviceCodeResponse, error) {
+// SignInRequestError is a browser sign-in that cannot go ahead with what
+// epack sent: a redirect address other than the loopback callback, or a
+// session that is malformed, expired, or for a different sign-in.
+type SignInRequestError struct {
+	msg string
+}
+
+func (e *SignInRequestError) Error() string {
+	return e.msg
+}
+
+// BrowserSignIn is a started browser sign-in: the address the person opens,
+// the state the browser carries back, and the session that finishes it.
+type BrowserSignIn struct {
+	AuthorizationURL string
+	State            string
+	Session          string
+	ExpiresIn        time.Duration
+}
+
+// browserSession is what finishing a sign-in needs. Each adapter process
+// serves one command, so it travels through epack instead of staying here.
+// It is not signed because there is no stable key before sign-in; the server
+// ties the code to the challenge and redirect address, so an altered session
+// only fails the exchange.
+type browserSession struct {
+	CodeVerifier string `json:"code_verifier"`
+	State        string `json:"state"`
+	RedirectURI  string `json:"redirect_uri"`
+	ExpiresAt    int64  `json:"expires_at"`
+}
+
+// StartBrowserSignIn begins an authorization code sign-in with PKCE that
+// returns to epack on a loopback address.
+func (o *OAuth) StartBrowserSignIn(redirectURI string) (*BrowserSignIn, error) {
+	if err := o.allowBrowserSignIn(); err != nil {
+		return nil, err
+	}
+	if !isLoopbackCallback(redirectURI) {
+		return nil, &SignInRequestError{msg: "redirect_uri must be http://127.0.0.1:<port>/callback"}
+	}
+
+	session := browserSession{
+		CodeVerifier: randomURLSafe(),
+		State:        randomURLSafe(),
+		RedirectURI:  redirectURI,
+		ExpiresAt:    time.Now().Add(locktivity.BrowserSignInLifetime).Unix(),
+	}
+	challenge := sha256.Sum256([]byte(session.CodeVerifier))
+	query := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {locktivity.PublicClientID},
+		"redirect_uri":          {redirectURI},
+		"scope":                 {"read:evidence_packs write:evidence_packs"},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challenge[:])},
+		"code_challenge_method": {"S256"},
+		"state":                 {session.State},
+	}
+
+	return &BrowserSignIn{
+		AuthorizationURL: o.baseURL + locktivity.OAuthAuthorizeEndpoint + "?" + query.Encode(),
+		State:            session.State,
+		Session:          session.encode(),
+		ExpiresIn:        locktivity.BrowserSignInLifetime,
+	}, nil
+}
+
+// CompleteBrowserSignIn exchanges the code the browser brought back for a
+// token and stores it, with the verifier and redirect address the session
+// carries.
+func (o *OAuth) CompleteBrowserSignIn(ctx context.Context, session, code, state string) error {
+	if err := o.allowBrowserSignIn(); err != nil {
+		return err
+	}
+	s, err := openBrowserSession(session, state)
+	if err != nil {
+		return err
+	}
+
+	tokenResp, err := o.doTokenRequest(ctx, locktivity.OAuthSignInTokenEndpoint, url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {s.RedirectURI},
+		"client_id":     {locktivity.PublicClientID},
+		"code_verifier": {s.CodeVerifier},
+	})
+	if err != nil {
+		return fmt.Errorf("could not finish the sign-in: %w", err)
+	}
+	if tokenResp.AccessToken == "" {
+		return errors.New("could not finish the sign-in: the token response has no access token")
+	}
+
+	return o.storeSignInToken(tokenResp)
+}
+
+func (o *OAuth) allowBrowserSignIn() error {
 	mode, err := EffectiveAuthMode()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if mode == AuthModeClientCredentialsOnly {
-		return nil, fmt.Errorf(
-			"%s=%s disables device code login",
+		return fmt.Errorf(
+			"%s=%s disables browser sign-in",
 			locktivity.EnvAuthMode,
 			AuthModeClientCredentialsOnly,
 		)
 	}
 
-	if err := o.validateAllModeAuthEndpoint(); err != nil {
-		return nil, err
-	}
-
-	return o.doDeviceCodeRequest(ctx)
+	return o.validateAllModeAuthEndpoint()
 }
 
-func (o *OAuth) doDeviceCodeRequest(ctx context.Context) (*locktivity.DeviceCodeResponse, error) {
-	deviceURL := o.baseURL + locktivity.OAuthDeviceCodeEndpoint
+func (s browserSession) encode() string {
+	data, _ := json.Marshal(s)
+	return base64.RawURLEncoding.EncodeToString(data)
+}
 
-	data := url.Values{"scope": {"read:evidence_packs write:evidence_packs"}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceURL, strings.NewReader(data.Encode()))
+func openBrowserSession(raw, state string) (browserSession, error) {
+	var session browserSession
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil || json.Unmarshal(data, &session) != nil ||
+		session.CodeVerifier == "" || session.State == "" || session.ExpiresAt == 0 ||
+		!isLoopbackCallback(session.RedirectURI) {
+		return browserSession{}, &SignInRequestError{msg: "this sign-in session is not valid: run 'epack remote login' again"}
+	}
+	if time.Now().Unix() >= session.ExpiresAt {
+		return browserSession{}, &SignInRequestError{msg: "this sign-in expired: run 'epack remote login' again"}
+	}
+	if subtle.ConstantTimeCompare([]byte(state), []byte(session.State)) != 1 {
+		return browserSession{}, &SignInRequestError{msg: "the state from the browser does not match this sign-in: run 'epack remote login' again"}
+	}
+	return session, nil
+}
+
+// isLoopbackCallback compares against the address rebuilt from the port,
+// which rules out any other scheme, host, or path, a missing or zero-padded
+// port, and userinfo, a query, or a fragment.
+func isLoopbackCallback(raw string) bool {
+	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("device code request failed with status %d", resp.StatusCode)
-	}
-
-	var deviceResp locktivity.DeviceCodeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&deviceResp); err != nil {
-		return nil, err
-	}
-
-	return &deviceResp, nil
+	port, err := strconv.Atoi(u.Port())
+	return err == nil && port >= 1 && port <= 65535 &&
+		raw == "http://127.0.0.1:"+strconv.Itoa(port)+"/callback"
 }
 
-// PollDeviceCodeToken polls the token endpoint until the user completes authentication.
-func (o *OAuth) PollDeviceCodeToken(ctx context.Context, deviceCode string, interval int) (*locktivity.TokenResponse, error) {
-	pollInterval := time.Duration(interval) * time.Second
-	if pollInterval < locktivity.DeviceCodePollInterval {
-		pollInterval = locktivity.DeviceCodePollInterval
-	}
-
-	deadline := time.Now().Add(locktivity.DeviceCodeMaxPollTime)
-
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(pollInterval):
-		}
-
-		result, err := o.pollDeviceCodeOnce(ctx, deviceCode)
-		if err != nil {
-			return nil, err
-		}
-		if result.token != nil {
-			return result.token, nil
-		}
-		if result.slowDown {
-			pollInterval += time.Second
-		}
-	}
-
-	return nil, fmt.Errorf("device code flow timed out")
+func randomURLSafe() string {
+	b := make([]byte, 32)
+	// crypto/rand.Read never returns an error; it crashes the program instead.
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-type deviceCodePollResult struct {
-	token    *locktivity.TokenResponse
-	slowDown bool
-}
-
-func (o *OAuth) pollDeviceCodeOnce(ctx context.Context, deviceCode string) (deviceCodePollResult, error) {
-	req, err := o.newDeviceCodeTokenRequest(ctx, deviceCode)
-	if err != nil {
-		return deviceCodePollResult{}, err
-	}
-
-	resp, err := o.httpClient.Do(req)
-	if err != nil {
-		return deviceCodePollResult{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	decoder := json.NewDecoder(resp.Body)
-	if resp.StatusCode == http.StatusOK {
-		return decodeDeviceCodeSuccess(decoder)
-	}
-	return decodeDeviceCodeError(decoder, resp.StatusCode)
-}
-
-func (o *OAuth) newDeviceCodeTokenRequest(ctx context.Context, deviceCode string) (*http.Request, error) {
-	data := url.Values{
-		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-		"device_code": {deviceCode},
-	}
-
-	tokenURL := o.baseURL + locktivity.OAuthTokenEndpoint
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return req, nil
-}
-
-// CompleteDeviceCodeFlow performs the full device code flow including storing the token.
-func (o *OAuth) CompleteDeviceCodeFlow(ctx context.Context, deviceCode string, interval int) error {
-	return o.completeDeviceCodeFlow(ctx, deviceCode, interval, o.PollDeviceCodeToken)
-}
-
-func (o *OAuth) completeDeviceCodeFlow(
-	ctx context.Context,
-	deviceCode string,
-	interval int,
-	pollFn func(context.Context, string, int) (*locktivity.TokenResponse, error),
-) error {
-	tokenResp, err := pollFn(ctx, deviceCode, interval)
-	if err != nil {
-		return err
-	}
-
-	return o.storeDeviceCodeToken(tokenResp)
-}
-
-func (o *OAuth) storeDeviceCodeToken(tokenResp *locktivity.TokenResponse) error {
+func (o *OAuth) storeSignInToken(tokenResp *locktivity.TokenResponse) error {
 	if o.keychain == nil {
 		return nil
+	}
+
+	// A stored client ID would let client credentials for that client reuse
+	// the person's token, and an older refresh token could bring back an
+	// earlier session, so both are replaced before the token is written. An
+	// empty refresh token clears the old one.
+	if err := o.keychain.SetClientID(""); err != nil {
+		return fmt.Errorf("failed to clear the stored client ID: %w", err)
+	}
+	if err := o.keychain.SetRefreshToken(tokenResp.RefreshToken); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to replace the stored refresh token: %v\n", err)
 	}
 
 	if err := o.keychain.SetToken(tokenResp.AccessToken); err != nil {
 		return fmt.Errorf("failed to store token: %w", err)
 	}
 
+	expiry := int64(0)
 	if tokenResp.ExpiresIn > 0 {
-		_ = o.keychain.SetTokenExpiry(time.Now().Unix() + int64(tokenResp.ExpiresIn))
+		expiry = time.Now().Unix() + int64(tokenResp.ExpiresIn)
 	}
-
-	if tokenResp.RefreshToken != "" {
-		if err := o.keychain.SetRefreshToken(tokenResp.RefreshToken); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to store refresh token: %v\n", err)
-		}
-	}
+	_ = o.keychain.SetTokenExpiry(expiry)
 
 	return nil
 }
@@ -546,6 +581,7 @@ func (o *OAuth) doRefreshTokenRequest(ctx context.Context, refreshToken string) 
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
+		"client_id":     {locktivity.PublicClientID},
 		"scope":         {"read:evidence_packs write:evidence_packs"},
 	}
 
@@ -584,38 +620,4 @@ func (o *OAuth) storeRefreshedToken(tokenResp *locktivity.TokenResponse) error {
 		_ = o.keychain.SetTokenExpiry(time.Now().Unix() + int64(tokenResp.ExpiresIn))
 	}
 	return nil
-}
-
-func decodeDeviceCodeSuccess(decoder *json.Decoder) (deviceCodePollResult, error) {
-	var tokenResp locktivity.TokenResponse
-	if err := decoder.Decode(&tokenResp); err != nil {
-		return deviceCodePollResult{}, err
-	}
-	return deviceCodePollResult{token: &tokenResp}, nil
-}
-
-func decodeDeviceCodeError(decoder *json.Decoder, statusCode int) (deviceCodePollResult, error) {
-	var errResp struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-	}
-	if err := decoder.Decode(&errResp); err != nil {
-		return deviceCodePollResult{}, fmt.Errorf("device code polling failed with status %d and non-JSON error body", statusCode)
-	}
-	return mapDeviceCodePollError(errResp.Error, errResp.ErrorDescription)
-}
-
-func mapDeviceCodePollError(errCode, errDescription string) (deviceCodePollResult, error) {
-	switch errCode {
-	case "authorization_pending":
-		return deviceCodePollResult{}, nil
-	case "slow_down":
-		return deviceCodePollResult{slowDown: true}, nil
-	case "expired_token":
-		return deviceCodePollResult{}, fmt.Errorf("device code expired")
-	case "access_denied":
-		return deviceCodePollResult{}, fmt.Errorf("access denied by user")
-	default:
-		return deviceCodePollResult{}, fmt.Errorf("OAuth error: %s - %s", errCode, errDescription)
-	}
 }

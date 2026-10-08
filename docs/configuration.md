@@ -73,10 +73,16 @@ export LOCKTIVITY_ACCESS_TOKEN="your-short-lived-token"
 epack push locktivity packs/evidence.epack
 ```
 
-### Interactive Device Code Login
+### Browser Sign-In
 
-Set `LOCKTIVITY_AUTH_MODE=all` to enable interactive login and stored-token
-refresh flows.
+```bash
+epack remote login locktivity
+```
+
+epack opens the Locktivity sign-in page in your browser. After you approve,
+the browser returns to epack on this machine and the session is kept in the OS
+keychain. Browser sign-in is on by default; set
+`LOCKTIVITY_AUTH_MODE=client_credentials_only` to turn it off.
 
 ## Runtime Override Environment Variables
 

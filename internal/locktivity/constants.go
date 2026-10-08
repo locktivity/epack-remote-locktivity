@@ -8,6 +8,9 @@ const (
 	DefaultAuthBaseURL = "https://app.locktivity.com"
 	APIVersion         = "v1"
 	APIPathPrefix      = "/management/v1/evidence_packs"
+
+	// SigningKeysPerPage is the largest page the API serves.
+	SigningKeysPerPage = 100
 )
 
 // HTTP constants.
@@ -23,21 +26,26 @@ const (
 
 // OAuth constants.
 const (
-	OAuthTokenEndpoint      = "/oauth2/token"
-	OAuthDeviceCodeEndpoint = "/oauth2/device/code"
-	DeviceCodePollInterval  = 5 * time.Second
-	DeviceCodeMaxPollTime   = 10 * time.Minute
+	OAuthTokenEndpoint     = "/oauth2/token"
+	OAuthAuthorizeEndpoint = "/epack/oauth2/authorize"
+	// OAuthSignInTokenEndpoint is where a browser sign-in's code is exchanged.
+	// The general token endpoint refuses epack's codes.
+	OAuthSignInTokenEndpoint = "/epack/oauth2/token"
+	BrowserSignInLifetime    = 10 * time.Minute
+
+	// PublicClientID is the public OAuth client every epack install signs in through.
+	PublicClientID = "epack"
 )
 
 // Environment variable names.
 const (
-	EnvAccessToken                  = "LOCKTIVITY_ACCESS_TOKEN"
-	EnvClientID                     = "LOCKTIVITY_CLIENT_ID"
-	EnvClientSecret                 = "LOCKTIVITY_CLIENT_SECRET"
-	EnvOIDCToken                    = "LOCKTIVITY_OIDC_TOKEN"
-	EnvEndpoint                     = "LOCKTIVITY_ENDPOINT"
-	EnvAuthEndpoint                 = "LOCKTIVITY_AUTH_ENDPOINT"
-	EnvAuthMode = "LOCKTIVITY_AUTH_MODE"
+	EnvAccessToken  = "LOCKTIVITY_ACCESS_TOKEN"
+	EnvClientID     = "LOCKTIVITY_CLIENT_ID"
+	EnvClientSecret = "LOCKTIVITY_CLIENT_SECRET"
+	EnvOIDCToken    = "LOCKTIVITY_OIDC_TOKEN"
+	EnvEndpoint     = "LOCKTIVITY_ENDPOINT"
+	EnvAuthEndpoint = "LOCKTIVITY_AUTH_ENDPOINT"
+	EnvAuthMode     = "LOCKTIVITY_AUTH_MODE"
 
 	EnvRemoteEndpoint     = "EPACK_REMOTE_ENDPOINT"
 	EnvRemoteAuthEndpoint = "EPACK_REMOTE_AUTH_ENDPOINT"

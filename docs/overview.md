@@ -55,8 +55,9 @@ export LOCKTIVITY_CLIENT_ID="your-client-id"
 export LOCKTIVITY_CLIENT_SECRET="your-client-secret"
 ```
 
-Interactive device-code login is available for local/manual use when
-`LOCKTIVITY_AUTH_MODE=all`.
+For local use, `epack remote login locktivity` signs you in through the
+browser and keeps the session in the OS keychain.
+`LOCKTIVITY_AUTH_MODE=client_credentials_only` turns browser sign-in off.
 
 ## Security Model
 

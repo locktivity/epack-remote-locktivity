@@ -70,6 +70,7 @@ type LockReportResponse struct {
 	Outcome        string `json:"outcome,omitempty"`
 	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
 	RevisionID     string `json:"revision_id,omitempty"`
+	PipelineURL    string `json:"pipeline_url,omitempty"`
 }
 
 type LockProvenance struct {
@@ -134,10 +135,12 @@ type RunSyncItem struct {
 	Status string `json:"status"`
 }
 
-// AuthLoginRequest is the request for auth.login operations.
+// AuthLoginRequest is the request for auth.login operations. RedirectURI is
+// the loopback address epack listens on for the browser to come back to.
 type AuthLoginRequest struct {
-	Type      string `json:"type"`
-	RequestID string `json:"request_id"`
+	Type        string `json:"type"`
+	RequestID   string `json:"request_id"`
+	RedirectURI string `json:"redirect_uri"`
 }
 
 // AuthLoginResponse is the response for auth.login operations.
@@ -148,11 +151,67 @@ type AuthLoginResponse struct {
 	Instructions AuthLoginInstructions `json:"instructions"`
 }
 
-// AuthLoginInstructions provides device code flow instructions.
+// AuthLoginInstructions starts a browser sign-in. State is also in the
+// authorization URL, so epack can ignore callbacks for other sign-ins. Session
+// is opaque to epack, which hands it back unchanged to auth.complete.
 type AuthLoginInstructions struct {
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresInSecs   int    `json:"expires_in_seconds"`
+	AuthorizationURL string `json:"authorization_url"`
+	State            string `json:"state"`
+	Session          string `json:"session"`
+	ExpiresInSecs    int    `json:"expires_in_seconds"`
+}
+
+// AuthCompleteRequest finishes the sign-in auth.login started, with the code
+// and state the browser brought back to epack.
+type AuthCompleteRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Session   string `json:"session"`
+	Code      string `json:"code"`
+	State     string `json:"state"`
+}
+
+// AuthCompleteResponse is the response for auth.complete operations.
+type AuthCompleteResponse struct {
+	OK        bool           `json:"ok"`
+	Type      string         `json:"type"`
+	RequestID string         `json:"request_id"`
+	Identity  IdentityResult `json:"identity"`
+}
+
+// ConfigPullRequest asks for the generated files of a named pipeline.
+type ConfigPullRequest struct {
+	Type      string            `json:"type"`
+	RequestID string            `json:"request_id"`
+	Config    ConfigPullTarget  `json:"config"`
+	Target    map[string]string `json:"target,omitempty"`
+}
+
+// ConfigPullTarget names the config to pull.
+type ConfigPullTarget struct {
+	Name string `json:"name"`
+}
+
+// ConfigPullResponse carries the files, their shas, and the revision.
+type ConfigPullResponse struct {
+	OK        bool             `json:"ok"`
+	Type      string           `json:"type"`
+	RequestID string           `json:"request_id"`
+	Config    ConfigPullResult `json:"config"`
+}
+
+// ConfigPullResult is one revision of a pipeline's generated files.
+type ConfigPullResult struct {
+	ID       string            `json:"id,omitempty"`
+	Name     string            `json:"name"`
+	Title    string            `json:"title,omitempty"`
+	Stream   string            `json:"stream,omitempty"`
+	RunsIn   string            `json:"runs_in,omitempty"`
+	Revision int               `json:"revision"`
+	Folder   string            `json:"folder,omitempty"`
+	Files    map[string]string `json:"files"`
+	Shas     map[string]string `json:"shas"`
+	Lockfile string            `json:"lockfile,omitempty"`
 }
 
 // AuthWhoamiRequest is the request for auth.whoami operations.
@@ -188,4 +247,97 @@ type ErrorInfo struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	Retryable bool   `json:"retryable"`
+}
+
+// KeyRegisterRequest is the request for key.register operations: a signing
+// key a signed-in person wants the pipeline to accept.
+type KeyRegisterRequest struct {
+	Type          string `json:"type"`
+	RequestID     string `json:"request_id"`
+	Config        string `json:"config"`
+	PublicKeyPEM  string `json:"public_key_pem"`
+	Name          string `json:"name,omitempty"`
+	ExpiresInDays int    `json:"expires_in_days,omitempty"`
+}
+
+// SigningKey describes one key a pipeline accepts signatures from.
+type SigningKey struct {
+	ID           string       `json:"id"`
+	Name         string       `json:"name,omitempty"`
+	Fingerprint  string       `json:"fingerprint"`
+	Algorithm    string       `json:"algorithm,omitempty"`
+	Status       string       `json:"status"`
+	RegisteredBy string       `json:"registered_by,omitempty"`
+	CreatedAt    string       `json:"created_at,omitempty"`
+	ExpiresAt    string       `json:"expires_at,omitempty"`
+	RevokedAt    string       `json:"revoked_at,omitempty"`
+	RetiredAt    string       `json:"retired_at,omitempty"`
+	Machine      string       `json:"machine,omitempty"`
+	Approval     *KeyApproval `json:"approval,omitempty"`
+}
+
+// KeyApproval is how a person approves a pending key: they type Code at URL
+// before ExpiresAt. Interval is how often to check back, in seconds.
+type KeyApproval struct {
+	Code      string `json:"code"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+	Interval  int    `json:"interval,omitempty"`
+}
+
+// KeyRegisterResponse is the response for key.register operations.
+type KeyRegisterResponse struct {
+	OK          bool       `json:"ok"`
+	Type        string     `json:"type"`
+	RequestID   string     `json:"request_id"`
+	Key         SigningKey `json:"key"`
+	Created     bool       `json:"created"`
+	PipelineURL string     `json:"pipeline_url,omitempty"`
+}
+
+// KeyListRequest is the request for key.list operations.
+type KeyListRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Config    string `json:"config"`
+}
+
+// KeyListResponse is the response for key.list operations.
+type KeyListResponse struct {
+	OK        bool         `json:"ok"`
+	Type      string       `json:"type"`
+	RequestID string       `json:"request_id"`
+	Keys      []SigningKey `json:"keys"`
+}
+
+// KeyRevokeRequest is the request for key.revoke operations.
+type KeyRevokeRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Config    string `json:"config"`
+	ID        string `json:"id"`
+}
+
+// KeyRevokeResponse is the response for key.revoke operations.
+type KeyRevokeResponse struct {
+	OK        bool       `json:"ok"`
+	Type      string     `json:"type"`
+	RequestID string     `json:"request_id"`
+	Key       SigningKey `json:"key"`
+}
+
+// KeyRetireRequest is the request for key.retire operations.
+type KeyRetireRequest struct {
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
+	Config    string `json:"config"`
+	ID        string `json:"id"`
+}
+
+// KeyRetireResponse is the response for key.retire operations.
+type KeyRetireResponse struct {
+	OK        bool       `json:"ok"`
+	Type      string     `json:"type"`
+	RequestID string     `json:"request_id"`
+	Key       SigningKey `json:"key"`
 }

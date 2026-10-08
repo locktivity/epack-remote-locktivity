@@ -12,7 +12,7 @@ See [docs/](docs/) for detailed documentation:
 - **Push**: Upload evidence packs and create releases
 - **Pull**: Download packs by latest release or release ID
 - **Run Sync**: Sync collector run ledgers for audit trails
-- **Auth Modes**: Brokered access token, client credentials, and optional device code login
+- **Auth Modes**: Brokered access token, client credentials, and optional browser sign-in
 - **Secure Storage**: OS keychain integration for interactive login tokens
 - **Hardened Finalize Tokens**: Signed, expiring, single-use finalize tokens
 - **Protocol Enforcement**: Requires `protocol_version: 1` on all requests
@@ -92,8 +92,13 @@ export LOCKTIVITY_CLIENT_SECRET="..."
 epack push locktivity packs/evidence.epack
 ```
 
-For local interactive use, device code login is available when
-`LOCKTIVITY_AUTH_MODE=all`.
+For local interactive use, `epack remote login locktivity` signs you in
+through the browser: epack opens the Locktivity sign-in page, and after you
+approve, the browser returns to epack on this machine. The session is kept in
+the OS keychain. By default (`LOCKTIVITY_AUTH_MODE=auto`) a push uses
+environment credentials first and a stored session second, and never starts a
+browser sign-in on its own. Set `LOCKTIVITY_AUTH_MODE=client_credentials_only`
+to refuse stored sessions and browser sign-in entirely, as on a shared CI runner.
 
 ## Supported Operations
 
@@ -107,8 +112,10 @@ The binary implements Remote Adapter Protocol v1 operations:
 | `pull.finalize` | Confirm download completion |
 | `runs.sync` | Sync run ledgers to Locktivity |
 | `lock.report` | Report resolved lockfile provenance without pushing a pack |
-| `auth.login` | Start device code flow |
+| `auth.login` | Start a browser sign-in; returns the authorization URL, its state, and a session |
+| `auth.complete` | Finish a browser sign-in with the code the browser returned; stores the token and returns the identity |
 | `auth.whoami` | Return current identity status |
+| `config.pull` | Fetch a pipeline's generated files, shas, and revision by its config name |
 
 All requests must include `protocol_version: 1`.
 
@@ -146,7 +153,7 @@ EPACK_REMOTE_AUTH_ENDPOINT=https://dev-tunnel.ngrok-free.app \
 | `LOCKTIVITY_ACCESS_TOKEN` | Pre-resolved bearer token for brokered or managed-runner auth |
 | `LOCKTIVITY_CLIENT_ID` | OAuth client ID for client credentials |
 | `LOCKTIVITY_CLIENT_SECRET` | OAuth client secret for client credentials |
-| `LOCKTIVITY_AUTH_MODE` | Auth mode: `client_credentials_only` (default) or `all` (enables device code login and stored-token refresh) |
+| `LOCKTIVITY_AUTH_MODE` | Auth mode: `auto` (default: environment credentials, then a stored session), `all` (also refreshes stored sessions against the allowed auth endpoint), or `client_credentials_only` (refuses stored sessions and browser sign-in) |
 | `EPACK_REMOTE_ENDPOINT` | Trusted API endpoint override passed by `epack` (from `insecure_endpoint` config) |
 | `EPACK_REMOTE_AUTH_ENDPOINT` | Trusted auth endpoint override passed by `epack` (from `auth.insecure_endpoint` config) |
 | `LOCKTIVITY_ENDPOINT` | Backward-compatible API endpoint override for standalone/manual use |

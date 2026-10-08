@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -30,7 +31,7 @@ type Keychain interface {
 	SetTokenExpiry(unix int64) error
 
 	// GetClientID retrieves the client_id that was used to obtain the stored token.
-	// Returns empty string if no client_id was stored (e.g., device code flow).
+	// Returns empty string if no client_id was stored (e.g., browser sign-in).
 	GetClientID() (string, error)
 
 	// SetClientID stores the client_id associated with the stored token.
@@ -132,8 +133,9 @@ func (k *OSKeychain) GetClientID() (string, error) {
 // SetClientID stores the client_id associated with the stored token.
 func (k *OSKeychain) SetClientID(clientID string) error {
 	if clientID == "" {
-		// Clear client_id when empty (e.g., device code flow)
-		_ = keyring.Delete(k.service, k.keyName("client_id"))
+		if err := keyring.Delete(k.service, k.keyName("client_id")); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return err
+		}
 		return nil
 	}
 	return keyring.Set(k.service, k.keyName("client_id"), clientID)

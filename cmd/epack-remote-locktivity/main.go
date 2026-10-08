@@ -23,7 +23,13 @@ type requestHandler interface {
 	LockReport(req remote.LockReportRequest) (*remote.LockReportResponse, error)
 	RunsSync(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	AuthLogin(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
+	AuthComplete(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error)
 	AuthWhoami(req remote.AuthWhoamiRequest) (*remote.AuthWhoamiResponse, error)
+	ConfigPull(req remote.ConfigPullRequest) (*remote.ConfigPullResponse, error)
+	KeyRegister(req remote.KeyRegisterRequest) (*remote.KeyRegisterResponse, error)
+	KeyList(req remote.KeyListRequest) (*remote.KeyListResponse, error)
+	KeyRevoke(req remote.KeyRevokeRequest) (*remote.KeyRevokeResponse, error)
+	KeyRetire(req remote.KeyRetireRequest) (*remote.KeyRetireResponse, error)
 }
 
 func main() {
@@ -97,7 +103,7 @@ func buildCapabilities() (map[string]any, error) {
 	}
 
 	authLoginEnabled := true
-	authModes := []string{"access_token", "device_code", "client_credentials"}
+	authModes := []string{"access_token", "browser", "client_credentials"}
 	if authMode == auth.AuthModeClientCredentialsOnly {
 		authLoginEnabled = false
 		authModes = []string{"access_token", "client_credentials"}
@@ -115,8 +121,12 @@ func buildCapabilities() (map[string]any, error) {
 			"runs_sync":        true,
 			"lock_report":      true,
 			"auth_login":       authLoginEnabled,
+			"auth_browser":     authLoginEnabled,
 			"whoami":           true,
+			"config_pull":      true,
+			"keys":             true,
 		},
+		"files_dir": ".locktivity",
 		"auth": map[string]any{
 			"modes": authModes,
 		},
@@ -167,7 +177,13 @@ func dispatchRequest(base baseRequest, data []byte, handler requestHandler) map[
 		"lock.report":   handleLockReport,
 		"runs.sync":     handleRunsSync,
 		"auth.login":    handleAuthLogin,
+		"auth.complete": handleAuthComplete,
 		"auth.whoami":   handleAuthWhoami,
+		"config.pull":   handleConfigPull,
+		"key.register":  handleKeyRegister,
+		"key.list":      handleKeyList,
+		"key.revoke":    handleKeyRevoke,
+		"key.retire":    handleKeyRetire,
 	}
 	fn, ok := dispatch[base.Type]
 	if !ok {
@@ -236,6 +252,54 @@ func handleLockReport(requestID string, data []byte, handler requestHandler) map
 	return successResponse(requestID, "lock.report.result", resp)
 }
 
+func handleKeyRegister(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.KeyRegisterRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse key.register request")
+	}
+	resp, err := handler.KeyRegister(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "key.register.result", resp)
+}
+
+func handleKeyList(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.KeyListRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse key.list request")
+	}
+	resp, err := handler.KeyList(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "key.list.result", resp)
+}
+
+func handleKeyRevoke(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.KeyRevokeRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse key.revoke request")
+	}
+	resp, err := handler.KeyRevoke(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "key.revoke.result", resp)
+}
+
+func handleKeyRetire(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.KeyRetireRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse key.retire request")
+	}
+	resp, err := handler.KeyRetire(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "key.retire.result", resp)
+}
+
 func handleRunsSync(requestID string, data []byte, handler requestHandler) map[string]any {
 	var req remote.RunsSyncRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -269,6 +333,40 @@ func handleAuthLogin(requestID string, data []byte, handler requestHandler) map[
 		"type":         resp.Type,
 		"request_id":   resp.RequestID,
 		"instructions": resp.Instructions,
+	}
+}
+
+func handleAuthComplete(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.AuthCompleteRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse auth.complete request")
+	}
+	resp, err := handler.AuthComplete(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return map[string]any{
+		"ok":         resp.OK,
+		"type":       resp.Type,
+		"request_id": resp.RequestID,
+		"identity":   resp.Identity,
+	}
+}
+
+func handleConfigPull(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.ConfigPullRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse config.pull request")
+	}
+	resp, err := handler.ConfigPull(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return map[string]any{
+		"ok":         resp.OK,
+		"type":       resp.Type,
+		"request_id": resp.RequestID,
+		"config":     resp.Config,
 	}
 }
 

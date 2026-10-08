@@ -84,6 +84,7 @@ type LockfileReportResponse struct {
 	Outcome        string `json:"outcome,omitempty"`
 	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
 	Status         string `json:"status,omitempty"`
+	PipelineURL    string `json:"pipeline_url,omitempty"`
 }
 
 type CreateFinalizeIntentRequest struct {
@@ -205,13 +206,19 @@ type TokenResponse struct {
 	Scope        string `json:"scope,omitempty"`
 }
 
-// DeviceCodeResponse is returned from OAuth device code endpoint.
-type DeviceCodeResponse struct {
-	DeviceCode      string `json:"device_code"`
-	UserCode        string `json:"user_code"`
-	VerificationURI string `json:"verification_uri"`
-	ExpiresIn       int    `json:"expires_in"`
-	Interval        int    `json:"interval"`
+// PipelineBundleResponse is returned from the pipeline bundle endpoint: the
+// generated files a terminal clones, with the revision they came from.
+type PipelineBundleResponse struct {
+	ID         string            `json:"id"`
+	Name       string            `json:"name"`
+	ConfigName string            `json:"config_name"`
+	Stream     string            `json:"stream"`
+	RunsIn     string            `json:"runs_in,omitempty"`
+	Revision   int               `json:"revision"`
+	Folder     string            `json:"folder,omitempty"`
+	Files      map[string]string `json:"files"`
+	Shas       map[string]string `json:"shas"`
+	Lockfile   string            `json:"lockfile,omitempty"`
 }
 
 // APIError represents an error response from the API.
@@ -231,4 +238,56 @@ func (e APIError) ErrorString() string {
 		return e.Errors[0]
 	}
 	return e.Error
+}
+
+// RegisterSigningKeyRequest asks a pipeline to accept a signing key.
+type RegisterSigningKeyRequest struct {
+	PublicKeyPEM string `json:"public_key_pem"`
+	Name         string `json:"name,omitempty"`
+	LifetimeDays int    `json:"lifetime_days,omitempty"`
+}
+
+type registerSigningKeyWrapper struct {
+	SigningKey RegisterSigningKeyRequest `json:"signing_key"`
+}
+
+// SigningKeyResponse is one key a pipeline accepts signatures from.
+type SigningKeyResponse struct {
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	Fingerprint  string              `json:"fingerprint"`
+	Algorithm    string              `json:"algorithm"`
+	Status       string              `json:"status"`
+	RegisteredBy string              `json:"registered_by"`
+	CreatedAt    string              `json:"created_at"`
+	ExpiresAt    string              `json:"expires_at"`
+	RevokedAt    string              `json:"revoked_at"`
+	RetiredAt    string              `json:"retired_at"`
+	ApprovedAt   string              `json:"approved_at"`
+	Machine      string              `json:"machine"`
+	Created      bool                `json:"created"`
+	Approval     *SigningKeyApproval `json:"approval,omitempty"`
+	PipelineURL  string              `json:"pipeline_url,omitempty"`
+}
+
+// SigningKeyApproval is how a person approves a pending key: they type Code
+// at URL before ExpiresAt. Interval is how often to check back, in seconds.
+// Only registering a key returns it.
+type SigningKeyApproval struct {
+	Code      string `json:"code"`
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at"`
+	Interval  int    `json:"interval"`
+}
+
+// SigningKeysResponse lists a pipeline's keys, newest first.
+type SigningKeysResponse struct {
+	SigningKeys []SigningKeyResponse `json:"signing_keys"`
+	Pagination  *Pagination          `json:"pagination,omitempty"`
+}
+
+// Pagination is where one page of a list sits among all of them.
+type Pagination struct {
+	Page     int `json:"page"`
+	LastPage int `json:"last_page"`
 }

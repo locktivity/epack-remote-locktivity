@@ -89,7 +89,13 @@ func TestReportLock_UsesLockfileReportEnvelope(t *testing.T) {
 			Outcome:        "success",
 			LockfileSHA256: "lock-sha",
 			Status:         "accepted",
+			PipelineURL:    "https://app.locktivity.com/evidence_packs/pipelines/pipeline-123",
 		},
+	}, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/lockfile_reports",
+		Status: http.StatusCreated,
+		Body:   `{"id": "rev_124", "pipeline_id": "pipeline-123", "outcome": "success", "status": "accepted"}`,
 	})
 
 	client := NewClientWithHTTP(server.Client(), server.URL())
@@ -108,6 +114,17 @@ func TestReportLock_UsesLockfileReportEnvelope(t *testing.T) {
 	}
 	if resp.Status != "accepted" {
 		t.Fatalf("expected accepted status, got %q", resp.Status)
+	}
+	if resp.PipelineURL != "https://app.locktivity.com/evidence_packs/pipelines/pipeline-123" {
+		t.Fatalf("expected the pipeline page, got %q", resp.PipelineURL)
+	}
+
+	resp, err = client.ReportLock(context.Background(), CreateLockfileReportRequest{PipelineID: "pipeline-123", TriggerKind: "check", Outcome: "success"})
+	if err != nil {
+		t.Fatalf("ReportLock failed: %v", err)
+	}
+	if resp.Status != "accepted" || resp.PipelineURL != "" {
+		t.Fatalf("expected no pipeline page when the API sends none, got %#v", resp)
 	}
 }
 
@@ -495,5 +512,198 @@ func TestHandleErrorResponse_UsesAPICode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "API error [PRODUCT_NOT_ENABLED]") {
 		t.Fatalf("expected coded API error, got %v", err)
+	}
+}
+
+func TestGetPipelineBundle_UsesPipelinePath(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodGet,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/bundle",
+		Status: http.StatusOK,
+		JSONBody: PipelineBundleResponse{
+			ID: "pipe_1", Name: "Northwind production", ConfigName: "northwind-production", Stream: "northwind/production",
+			Revision: 1,
+			Files:    map[string]string{"northwind/production/epack.yaml": "stream: northwind/production\n"},
+			Shas:     map[string]string{"northwind/production/epack.yaml": "abc"},
+		},
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.GetPipelineBundle(context.Background(), "northwind-production")
+	if err != nil {
+		t.Fatalf("GetPipelineBundle failed: %v", err)
+	}
+	if resp.ConfigName != "northwind-production" || resp.Revision != 1 || resp.Files["northwind/production/epack.yaml"] == "" {
+		t.Fatalf("unexpected bundle: %#v", resp)
+	}
+}
+
+func TestRegisterSigningKey_SendsMachineAndReturnsApproval(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/signing_keys",
+		Status: http.StatusCreated,
+		Check: func(t *testing.T, r *http.Request, body []byte) {
+			t.Helper()
+
+			if got := r.Header.Get(MachineHeader); got != "Michaels-MacBook-Pro-2.local" {
+				t.Fatalf("expected %s Michaels-MacBook-Pro-2.local, got %q", MachineHeader, got)
+			}
+
+			var payload map[string]map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+			key, ok := payload["signing_key"]
+			if !ok {
+				t.Fatalf("expected top-level signing_key envelope, got %v", payload)
+			}
+			if key["public_key_pem"] != "pem" || key["name"] != "Michaels-MacBook-Pro-2" || key["lifetime_days"] != float64(365) {
+				t.Fatalf("unexpected signing_key: %v", key)
+			}
+		},
+		Body: `{
+			"id": "key_1", "name": "Michaels-MacBook-Pro-2", "fingerprint": "9f14", "algorithm": "ecdsa",
+			"status": "pending", "registered_by": "michael@example.com", "created_at": "2026-10-07T18:00:00Z",
+			"expires_at": "2027-10-07T18:00:00Z", "revoked_at": null, "approved_at": null,
+			"machine": "Michaels-MacBook-Pro-2.local", "created": true,
+			"approval": {
+				"code": "WDJB-MJHT",
+				"url": "https://app.locktivity.com/evidence_packs/pipelines/pipe_1/signing_keys/key_1/approval",
+				"expires_at": "2026-10-07T18:15:00Z",
+				"interval": 5
+			},
+			"pipeline_url": "https://app.locktivity.com/evidence_packs/pipelines/pipe_1"
+		}`,
+	}, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/signing_keys",
+		Status: http.StatusOK,
+		Body:   `{"id": "key_1", "fingerprint": "9f14", "status": "usable", "created": false}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	client.machine = "Michaels-MacBook-Pro-2.local"
+	resp, err := client.RegisterSigningKey(context.Background(), "northwind-production", RegisterSigningKeyRequest{
+		PublicKeyPEM: "pem",
+		Name:         "Michaels-MacBook-Pro-2",
+		LifetimeDays: 365,
+	})
+	if err != nil {
+		t.Fatalf("RegisterSigningKey failed: %v", err)
+	}
+	if resp.Status != "pending" || !resp.Created || resp.Machine != "Michaels-MacBook-Pro-2.local" || resp.ApprovedAt != "" {
+		t.Fatalf("unexpected key: %#v", resp)
+	}
+	want := SigningKeyApproval{
+		Code:      "WDJB-MJHT",
+		URL:       "https://app.locktivity.com/evidence_packs/pipelines/pipe_1/signing_keys/key_1/approval",
+		ExpiresAt: "2026-10-07T18:15:00Z",
+		Interval:  5,
+	}
+	if resp.Approval == nil || *resp.Approval != want {
+		t.Fatalf("expected approval %#v, got %#v", want, resp.Approval)
+	}
+	if resp.PipelineURL != "https://app.locktivity.com/evidence_packs/pipelines/pipe_1" {
+		t.Fatalf("expected the pipeline page, got %q", resp.PipelineURL)
+	}
+
+	resp, err = client.RegisterSigningKey(context.Background(), "northwind-production", RegisterSigningKeyRequest{PublicKeyPEM: "pem"})
+	if err != nil {
+		t.Fatalf("RegisterSigningKey failed: %v", err)
+	}
+	if resp.Created || resp.PipelineURL != "" {
+		t.Fatalf("expected no pipeline page when the API sends none, got %#v", resp)
+	}
+}
+
+func TestListSigningKeys_ReturnsMachineWithoutApproval(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodGet,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/signing_keys",
+		Status: http.StatusOK,
+		Body: `{"signing_keys": [
+			{
+				"id": "key_2", "name": "Michaels-MacBook-Pro-2", "fingerprint": "0a0a", "algorithm": "ecdsa",
+				"status": "pending", "registered_by": "michael@example.com", "created_at": "2026-10-07T18:00:00Z",
+				"expires_at": "2027-10-07T18:00:00Z", "revoked_at": null, "approved_at": null,
+				"machine": "Michaels-MacBook-Pro-2.local"
+			},
+			{
+				"id": "key_1", "name": "ci", "fingerprint": "9f14", "algorithm": "ecdsa",
+				"status": "usable", "registered_by": "michael@example.com", "created_at": "2026-10-01T09:00:00Z",
+				"expires_at": "2027-10-01T09:00:00Z", "revoked_at": null, "approved_at": "2026-10-01T09:03:00Z",
+				"machine": null
+			}
+		]}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.ListSigningKeys(context.Background(), "northwind-production")
+	if err != nil {
+		t.Fatalf("ListSigningKeys failed: %v", err)
+	}
+	if len(resp.SigningKeys) != 2 {
+		t.Fatalf("expected two keys, got %#v", resp.SigningKeys)
+	}
+	pending, usable := resp.SigningKeys[0], resp.SigningKeys[1]
+	if pending.Status != "pending" || pending.Machine != "Michaels-MacBook-Pro-2.local" || pending.ApprovedAt != "" || pending.Approval != nil {
+		t.Fatalf("unexpected pending key: %#v", pending)
+	}
+	if usable.Status != "usable" || usable.Machine != "" || usable.ApprovedAt != "2026-10-01T09:03:00Z" || usable.Approval != nil {
+		t.Fatalf("unexpected usable key: %#v", usable)
+	}
+}
+
+func TestListSigningKeys_ReadsEveryPage(t *testing.T) {
+	path := APIPathPrefix + "/pipelines/northwind-production/signing_keys"
+	server := contracttest.NewServer(t,
+		contracttest.Step{
+			Method: http.MethodGet,
+			Path:   path,
+			Query:  url.Values{"page": {"1"}, "per_page": {"100"}},
+			Status: http.StatusOK,
+			Body: `{"signing_keys": [{"id": "key_2", "fingerprint": "0a0a", "status": "revoked"}],
+				"pagination": {"total": 2, "last_page": 2, "page": 1, "next_url": "https://api.locktivity.com/next", "prev_url": null}}`,
+		},
+		contracttest.Step{
+			Method: http.MethodGet,
+			Path:   path,
+			Query:  url.Values{"page": {"2"}, "per_page": {"100"}},
+			Status: http.StatusOK,
+			Body: `{"signing_keys": [{"id": "key_1", "fingerprint": "9f14", "status": "usable"}],
+				"pagination": {"total": 2, "last_page": 2, "page": 2, "next_url": null, "prev_url": "https://api.locktivity.com/prev"}}`,
+		},
+	)
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.ListSigningKeys(context.Background(), "northwind-production")
+	if err != nil {
+		t.Fatalf("ListSigningKeys failed: %v", err)
+	}
+	var ids []string
+	for _, key := range resp.SigningKeys {
+		ids = append(ids, key.ID)
+	}
+	if strings.Join(ids, ",") != "key_2,key_1" {
+		t.Fatalf("expected both pages in order, got %v", ids)
+	}
+}
+
+func TestRetireSigningKey_PostsToTheKeysRetirement(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/signing_keys/key_1/retirement",
+		Status: http.StatusCreated,
+		Body:   `{"id": "key_1", "fingerprint": "9f14", "status": "retired", "retired_at": "2026-10-07T18:05:00Z"}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.RetireSigningKey(context.Background(), "northwind-production", "key_1")
+	if err != nil {
+		t.Fatalf("RetireSigningKey failed: %v", err)
+	}
+	if resp.Status != "retired" || resp.RetiredAt != "2026-10-07T18:05:00Z" {
+		t.Fatalf("unexpected key: %#v", resp)
 	}
 }
