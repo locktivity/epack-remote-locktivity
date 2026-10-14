@@ -21,6 +21,7 @@ type requestHandler interface {
 	PullPrepare(req componentsdk.PullPrepareRequest) (*componentsdk.PullPrepareResponse, error)
 	PullFinalize(req componentsdk.PullFinalizeRequest) (*componentsdk.PullFinalizeResponse, error)
 	LockReport(req remote.LockReportRequest) (*remote.LockReportResponse, error)
+	RunProgress(req remote.RunProgressRequest) (*remote.RunProgressResponse, error)
 	RunsSync(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	AuthLogin(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
 	AuthComplete(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error)
@@ -121,6 +122,7 @@ func buildCapabilities() (map[string]any, error) {
 			"pull":             true,
 			"runs_sync":        true,
 			"lock_report":      true,
+			"run_progress":     true,
 			"auth_login":       authLoginEnabled,
 			"auth_browser":     authLoginEnabled,
 			"whoami":           true,
@@ -178,6 +180,7 @@ func dispatchRequest(base baseRequest, data []byte, handler requestHandler) map[
 		"pull.prepare":  handlePullPrepare,
 		"pull.finalize": handlePullFinalize,
 		"lock.report":   handleLockReport,
+		"run.progress":  handleRunProgress,
 		"runs.sync":     handleRunsSync,
 		"auth.login":    handleAuthLogin,
 		"auth.complete": handleAuthComplete,
@@ -255,6 +258,18 @@ func handleLockReport(requestID string, data []byte, handler requestHandler) map
 		return remoteErrorResponse(requestID, err)
 	}
 	return successResponse(requestID, "lock.report.result", resp)
+}
+
+func handleRunProgress(requestID string, data []byte, handler requestHandler) map[string]any {
+	var req remote.RunProgressRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return errorResponse(requestID, "invalid_request", "failed to parse run.progress request")
+	}
+	resp, err := handler.RunProgress(req)
+	if err != nil {
+		return remoteErrorResponse(requestID, err)
+	}
+	return successResponse(requestID, "run.progress.result", resp)
 }
 
 func handleKeyRegister(requestID string, data []byte, handler requestHandler) map[string]any {

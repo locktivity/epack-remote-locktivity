@@ -188,6 +188,98 @@ func TestLockReport(t *testing.T) {
 	}
 }
 
+func TestRunProgress(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".locktivity"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".locktivity", "manifest.json"), []byte(`{"schema_version":1,"pipeline_id":"pipe_9"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ProjectRootEnvVar, root)
+
+	mockClient := locktivity.NewMockClient()
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.RunProgress(RunProgressRequest{
+		RequestID: "req_123",
+		Remote:    "locktivity",
+		Target:    RemoteTarget{Workspace: "acme", Environment: "prod"},
+		Run:       ProgressRun{ID: "20261014T150211Z-9f3a1c2b", StartedAt: "2026-10-14T15:02:11Z"},
+		Event:     ProgressEvent{At: "2026-10-14T15:02:40Z", Stage: "collect", Step: "okta", Index: 2, Total: 5, State: "started", Note: "listing users"},
+	})
+	if err != nil {
+		t.Fatalf("RunProgress failed: %v", err)
+	}
+	if !resp.OK || resp.Type != "run.progress.result" || resp.RequestID != "req_123" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if len(mockClient.ReportRunProgressCalls) != 1 {
+		t.Fatalf("expected one ReportRunProgress call, got %d", len(mockClient.ReportRunProgressCalls))
+	}
+	call := mockClient.ReportRunProgressCalls[0]
+	if call.PipelineID != "pipe_9" || call.RunID != "20261014T150211Z-9f3a1c2b" || call.StartedAt != "2026-10-14T15:02:11Z" {
+		t.Fatalf("unexpected run: %#v", call)
+	}
+	want := locktivity.RunProgressEvent{At: "2026-10-14T15:02:40Z", Stage: "collect", Step: "okta", Index: 2, Total: 5, State: "started", Note: "listing users"}
+	if call.Event != want {
+		t.Fatalf("event %#v, want %#v", call.Event, want)
+	}
+
+	mockClient.ReportRunProgressError = errors.New("unprocessable_entity: event stage must be one of install, collect")
+	_, err = handler.RunProgress(RunProgressRequest{RequestID: "req_124", Run: ProgressRun{ID: "20261014T150211Z-9f3a1c2b"}, Event: ProgressEvent{Stage: "deploy", State: "started"}})
+	if err == nil || !strings.Contains(err.Error(), "event stage must be one of") {
+		t.Fatalf("expected the API's refusal to come back, got %v", err)
+	}
+}
+
+func TestRunProgressWithoutAManifestLeavesThePipelineToTheToken(t *testing.T) {
+	t.Setenv(ProjectRootEnvVar, t.TempDir())
+	mockClient := locktivity.NewMockClient()
+	handler := &Handler{client: mockClient}
+
+	if _, err := handler.RunProgress(RunProgressRequest{RequestID: "req_1", Run: ProgressRun{ID: "20261014T150211Z-9f3a1c2b"}, Event: ProgressEvent{Stage: "install", State: "started"}}); err != nil {
+		t.Fatalf("RunProgress failed: %v", err)
+	}
+	if got := mockClient.ReportRunProgressCalls[0].PipelineID; got != "" {
+		t.Fatalf("pipeline %q, want none so a token bound to one names it", got)
+	}
+}
+
+func TestRunProgressNeedsASignIn(t *testing.T) {
+	handler := &Handler{oauth: auth.NewOAuth(locktivity.DefaultAuthBaseURL, auth.NewMemoryKeychain())}
+
+	_, err := handler.RunProgress(RunProgressRequest{RequestID: "req_1", Run: ProgressRun{ID: "20261014T150211Z-9f3a1c2b"}, Event: ProgressEvent{Stage: "install", State: "started"}})
+	var remoteErr componentsdk.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr.Code != "auth_required" {
+		t.Fatalf("expected auth_required, got %v", err)
+	}
+}
+
+func TestPushCarriesTheRunIDToTheRelease(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	keychain := auth.NewMemoryKeychain()
+	_ = keychain.SetToken("test-token")
+	handler := &Handler{client: mockClient, keychain: keychain, endpoint: "https://api.locktivity.com"}
+
+	prepared, err := handler.PushPrepare(PushPrepareRequest{
+		RequestID: "req_1",
+		Target:    RemoteTarget{Environment: "prod"},
+		Pack:      PackInfo{Digest: "sha256:abc123", SizeBytes: 1024},
+		Release:   ReleaseInfo{Version: "1.2.3", RunID: "20261014T150211Z-9f3a1c2b"},
+	})
+	if err != nil {
+		t.Fatalf("PushPrepare failed: %v", err)
+	}
+	if _, err := handler.PushFinalize(PushFinalizeRequest{RequestID: "req_2", FinalizeToken: prepared.FinalizeToken}); err != nil {
+		t.Fatalf("PushFinalize failed: %v", err)
+	}
+	call := mockClient.CreateReleaseCalls[0]
+	if call.RunID != "20261014T150211Z-9f3a1c2b" || call.Version != "1.2.3" {
+		t.Fatalf("release %#v, want the run id and version from push.prepare", call)
+	}
+}
+
 func TestPushPrepare_ExistingPackIncludesFinalizeToken(t *testing.T) {
 	mockClient := locktivity.NewMockClient()
 	mockClient.CreatePackResponse.Exists = true

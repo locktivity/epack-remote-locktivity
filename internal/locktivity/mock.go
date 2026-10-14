@@ -21,6 +21,8 @@ type MockClient struct {
 	CreateReleaseError             error
 	ReportLockResponse             *LockfileReportResponse
 	ReportLockError                error
+	ReportRunProgressResponse      *RunProgressEventResponse
+	ReportRunProgressError         error
 	GetReleaseResponse             *ReleaseResponse
 	GetReleaseError                error
 	GetLatestReleaseResponse       *ReleaseResponse
@@ -55,6 +57,7 @@ type MockClient struct {
 	ConsumeFinalizeIntentCalls  []ConsumeFinalizeIntentRequest
 	CreateReleaseCalls          []CreateReleaseRequest
 	ReportLockCalls             []CreateLockfileReportRequest
+	ReportRunProgressCalls      []CreateRunProgressEventRequest
 	GetReleaseCalls             []string
 	GetLatestReleaseCalls       []GetLatestReleaseCall
 	GetVersionReleaseCalls      []GetVersionReleaseCall
@@ -143,6 +146,11 @@ func NewMockClient() *MockClient {
 			LockfileSHA256: "abc123",
 			Status:         "accepted",
 		},
+		ReportRunProgressResponse: &RunProgressEventResponse{
+			Status:     "recorded",
+			RunID:      "20261014T150211Z-9f3a1c2b",
+			PipelineID: "pipeline_123",
+		},
 		GetLatestReleaseResponse: &ReleaseResponse{
 			ID: "rel_123",
 			Pack: &PackInfo{
@@ -223,6 +231,14 @@ func (m *MockClient) ReportLock(ctx context.Context, req CreateLockfileReportReq
 		return nil, m.ReportLockError
 	}
 	return m.ReportLockResponse, nil
+}
+
+func (m *MockClient) ReportRunProgress(ctx context.Context, req CreateRunProgressEventRequest) (*RunProgressEventResponse, error) {
+	m.ReportRunProgressCalls = append(m.ReportRunProgressCalls, req)
+	if m.ReportRunProgressError != nil {
+		return nil, m.ReportRunProgressError
+	}
+	return m.ReportRunProgressResponse, nil
 }
 
 func (m *MockClient) GetRelease(ctx context.Context, releaseID string) (*ReleaseResponse, error) {

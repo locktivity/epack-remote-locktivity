@@ -12,6 +12,7 @@ See [docs/](docs/) for detailed documentation:
 - **Push**: Upload evidence packs and create releases
 - **Pull**: Download packs by latest release or release ID
 - **Run Sync**: Sync collector run ledgers for audit trails
+- **Run Progress**: Report each step of a run while it is going, so the pipeline page can show it
 - **Auth Modes**: Brokered access token, client credentials, and optional browser sign-in
 - **Secure Storage**: OS keychain integration for interactive login tokens
 - **Hardened Finalize Tokens**: Signed, expiring, single-use finalize tokens
@@ -112,6 +113,7 @@ The binary implements Remote Adapter Protocol v1 operations:
 | `pull.finalize` | Confirm download completion |
 | `runs.sync` | Sync run ledgers to Locktivity |
 | `lock.report` | Report resolved lockfile provenance without pushing a pack |
+| `run.progress` | Report one step of a run while it is going; the pipeline comes from the folder's manifest, or from a token bound to one |
 | `auth.login` | Start a browser sign-in; returns the authorization URL, its state, and a session |
 | `auth.complete` | Finish a browser sign-in with the code the browser returned; stores the token and returns the identity |
 | `auth.whoami` | Return current identity status |

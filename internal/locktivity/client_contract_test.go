@@ -58,6 +58,52 @@ func TestCreatePack_UsesPackEnvelope(t *testing.T) {
 	}
 }
 
+func TestReportRunProgress_UsesRunProgressEventEnvelope(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/run_progress_events",
+		Status: http.StatusCreated,
+		Check: func(t *testing.T, r *http.Request, body []byte) {
+			t.Helper()
+
+			var payload map[string]map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("failed to decode request body: %v", err)
+			}
+
+			event, ok := payload["run_progress_event"]
+			if !ok {
+				t.Fatalf("expected top-level run_progress_event envelope, got %v", payload)
+			}
+			if event["pipeline_id"] != "pipeline-123" || event["run_id"] != "20261014T150211Z-9f3a1c2b" || event["started_at"] != "2026-10-14T15:02:11Z" {
+				t.Fatalf("unexpected run fields: %v", event)
+			}
+			step, _ := event["event"].(map[string]any)
+			if step["stage"] != "collect" || step["step"] != "okta" || step["index"] != float64(2) || step["total"] != float64(5) || step["state"] != "started" || step["note"] != "listing users" {
+				t.Fatalf("unexpected event: %v", step)
+			}
+			if r.Header.Get(MachineHeader) == "" {
+				t.Fatal("expected the machine header on a progress event")
+			}
+		},
+		JSONBody: RunProgressEventResponse{Status: "recorded", RunID: "20261014T150211Z-9f3a1c2b", PipelineID: "pipeline-123"},
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.ReportRunProgress(context.Background(), CreateRunProgressEventRequest{
+		PipelineID: "pipeline-123",
+		RunID:      "20261014T150211Z-9f3a1c2b",
+		StartedAt:  "2026-10-14T15:02:11Z",
+		Event:      RunProgressEvent{At: "2026-10-14T15:02:40Z", Stage: "collect", Step: "okta", Index: 2, Total: 5, State: "started", Note: "listing users"},
+	})
+	if err != nil {
+		t.Fatalf("ReportRunProgress failed: %v", err)
+	}
+	if resp.Status != "recorded" || resp.RunID != "20261014T150211Z-9f3a1c2b" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
 func TestReportLock_UsesLockfileReportEnvelope(t *testing.T) {
 	server := contracttest.NewServer(t, contracttest.Step{
 		Method: http.MethodPost,

@@ -146,6 +146,38 @@ func TestProcessRequest_LockReportSuccess(t *testing.T) {
 	}
 }
 
+func TestProcessRequest_RunProgressSuccess(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	handler := remote.NewHandlerWithClient(mockClient, nil)
+
+	resp := processRequest([]byte(`{
+		"type":"run.progress",
+		"request_id":"req_1",
+		"protocol_version":1,
+		"remote":"locktivity",
+		"target":{"workspace":"acme","environment":"prod"},
+		"run":{"id":"20261014T150211Z-9f3a1c2b","started_at":"2026-10-14T15:02:11Z"},
+		"event":{"at":"2026-10-14T15:02:40Z","stage":"collect","step":"okta","index":2,"total":5,"state":"started"}
+	}`), handler)
+
+	if got := resp["ok"]; got != true {
+		t.Fatalf("expected ok=true, got %v", got)
+	}
+	if got := resp["type"]; got != "run.progress.result" {
+		t.Fatalf("expected run.progress.result, got %v", got)
+	}
+	if got := resp["request_id"]; got != "req_1" {
+		t.Fatalf("expected request_id req_1, got %v", got)
+	}
+	if len(mockClient.ReportRunProgressCalls) != 1 {
+		t.Fatalf("expected one ReportRunProgress call, got %d", len(mockClient.ReportRunProgressCalls))
+	}
+	call := mockClient.ReportRunProgressCalls[0]
+	if call.RunID != "20261014T150211Z-9f3a1c2b" || call.Event.Step != "okta" || call.Event.Index != 2 || call.Event.Total != 5 {
+		t.Fatalf("unexpected event: %#v", call)
+	}
+}
+
 func TestProcessRequest_CredentialsResolveReturnsTheEnv(t *testing.T) {
 	mockClient := locktivity.NewMockClient()
 	mockClient.ResolveCredentialSetsResponse = &locktivity.ResolvedCredentials{Env: map[string]string{"LOCKTIVITY_DOCUMENTS_TOKEN": "tok_docs"}}
@@ -201,6 +233,11 @@ func TestProcessRequest_ParseErrorsByOperation(t *testing.T) {
 			name:    "lock.report",
 			payload: `{"type":"lock.report","request_id":"req_1","protocol_version":1,"lock_provenance":"oops"}`,
 			wantMsg: "failed to parse lock.report request",
+		},
+		{
+			name:    "run.progress",
+			payload: `{"type":"run.progress","request_id":"req_1","protocol_version":1,"run":{"id":"20261014T150211Z-9f3a1c2b"},"event":"oops"}`,
+			wantMsg: "failed to parse run.progress request",
 		},
 		{
 			name:    "auth.login",
@@ -501,6 +538,9 @@ func TestBuildCapabilities_AllMode(t *testing.T) {
 	if !features["lock_report"] {
 		t.Fatal("expected lock_report=true")
 	}
+	if !features["run_progress"] {
+		t.Fatal("expected run_progress=true")
+	}
 }
 
 func TestBuildCapabilities_InvalidAuthMode(t *testing.T) {
@@ -517,6 +557,7 @@ type fakeRequestHandler struct {
 	pullPrepare  func(req componentsdk.PullPrepareRequest) (*componentsdk.PullPrepareResponse, error)
 	pullFinalize func(req componentsdk.PullFinalizeRequest) (*componentsdk.PullFinalizeResponse, error)
 	lockReport   func(req remote.LockReportRequest) (*remote.LockReportResponse, error)
+	runProgress  func(req remote.RunProgressRequest) (*remote.RunProgressResponse, error)
 	runsSync     func(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error)
 	authLogin    func(req remote.AuthLoginRequest) (*remote.AuthLoginResponse, error)
 	authComplete func(req remote.AuthCompleteRequest) (*remote.AuthCompleteResponse, error)
@@ -591,6 +632,13 @@ func (f fakeRequestHandler) LockReport(req remote.LockReportRequest) (*remote.Lo
 		return f.lockReport(req)
 	}
 	return &remote.LockReportResponse{}, nil
+}
+
+func (f fakeRequestHandler) RunProgress(req remote.RunProgressRequest) (*remote.RunProgressResponse, error) {
+	if f.runProgress != nil {
+		return f.runProgress(req)
+	}
+	return &remote.RunProgressResponse{}, nil
 }
 
 func (f fakeRequestHandler) RunsSync(req remote.RunsSyncRequest) (*remote.RunsSyncResponse, error) {

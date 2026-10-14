@@ -32,6 +32,9 @@ type Client interface {
 	// Lockfile report operations
 	ReportLock(ctx context.Context, req CreateLockfileReportRequest) (*LockfileReportResponse, error)
 
+	// Run progress, one step of a run while it is going
+	ReportRunProgress(ctx context.Context, req CreateRunProgressEventRequest) (*RunProgressEventResponse, error)
+
 	// Run operations
 	SyncRuns(ctx context.Context, req CreatePackRunsRequest) (*PackRunsResponse, error)
 	ConfirmRunOutputUpload(ctx context.Context, outputID string, req ConfirmRunOutputUploadRequest) (*ConfirmRunOutputUploadResponse, error)
@@ -198,6 +201,21 @@ func (c *APIClient) ReportLock(ctx context.Context, req CreateLockfileReportRequ
 
 	var resp LockfileReportResponse
 	if err := c.doJSON(ctx, http.MethodPost, path, createLockfileReportWrapper{LockfileReport: req}, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+type createRunProgressEventWrapper struct {
+	RunProgressEvent CreateRunProgressEventRequest `json:"run_progress_event"`
+}
+
+// ReportRunProgress reports one step of a run to Locktivity.
+func (c *APIClient) ReportRunProgress(ctx context.Context, req CreateRunProgressEventRequest) (*RunProgressEventResponse, error) {
+	path := fmt.Sprintf("%s/run_progress_events", APIPathPrefix)
+
+	var resp RunProgressEventResponse
+	if err := c.doJSON(ctx, http.MethodPost, path, createRunProgressEventWrapper{RunProgressEvent: req}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

@@ -97,6 +97,7 @@ type PushFinalizeTokenData struct {
 	Notes         string            `json:"notes,omitempty"`
 	Labels        []string          `json:"labels,omitempty"`
 	BuildContext  map[string]string `json:"build_context,omitempty"`
+	RunID         string            `json:"run_id,omitempty"`
 	ExpiresAt     int64             `json:"exp"`
 	Nonce         string            `json:"nonce"`
 }
@@ -322,6 +323,7 @@ func (h *Handler) PushPrepare(req PushPrepareRequest) (*componentsdk.PushPrepare
 		Notes:         req.Release.Notes,
 		Labels:        req.Release.Labels,
 		BuildContext:  req.Release.BuildContext,
+		RunID:         req.Release.RunID,
 		ExpiresAt:     time.Now().Add(finalizeTokenTTL).Unix(),
 		Nonce:         randomNonce(),
 	}
@@ -386,6 +388,7 @@ func (h *Handler) PushFinalize(req PushFinalizeRequest) (*componentsdk.PushFinal
 		Labels:         tokenData.Labels,
 		BuildContext:   tokenData.BuildContext,
 		LockProvenance: req.Release.LockProvenance,
+		RunID:          tokenData.RunID,
 	}
 
 	// Retry loop for 202 Accepted (processing) and 429 (rate limit) responses
@@ -471,6 +474,42 @@ func (h *Handler) LockReport(req LockReportRequest) (*LockReportResponse, error)
 		LockfileSHA256: reportResp.LockfileSHA256,
 		RevisionID:     reportResp.RevisionID,
 		PipelineURL:    reportResp.PipelineURL,
+	}, nil
+}
+
+// RunProgress handles run.progress requests. The request names no
+// configuration, so the pipeline comes from the folder's manifest; when the
+// folder has none, a token bound to one pipeline lets Locktivity fill it in.
+func (h *Handler) RunProgress(req RunProgressRequest) (*RunProgressResponse, error) {
+	ctx := context.Background()
+
+	client, err := h.getClient(ctx)
+	if err != nil {
+		return nil, componentsdk.ErrAuthRequired(err.Error())
+	}
+
+	_, err = client.ReportRunProgress(ctx, locktivity.CreateRunProgressEventRequest{
+		PipelineID: bundlePipelineID(),
+		RunID:      req.Run.ID,
+		StartedAt:  req.Run.StartedAt,
+		Event: locktivity.RunProgressEvent{
+			At:    req.Event.At,
+			Stage: req.Event.Stage,
+			Step:  req.Event.Step,
+			Index: req.Event.Index,
+			Total: req.Event.Total,
+			State: req.Event.State,
+			Note:  req.Event.Note,
+		},
+	})
+	if err != nil {
+		return nil, toRemoteError(err)
+	}
+
+	return &RunProgressResponse{
+		OK:        true,
+		Type:      "run.progress.result",
+		RequestID: req.RequestID,
 	}, nil
 }
 

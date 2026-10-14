@@ -49,6 +49,7 @@ type ReleaseInfo struct {
 	Labels         []string          `json:"labels,omitempty"`
 	BuildContext   map[string]string `json:"build_context,omitempty"`
 	LockProvenance *LockProvenance   `json:"lock_provenance,omitempty"`
+	RunID          string            `json:"run_id,omitempty"`
 }
 
 // LockReportRequest is the request for lock.report operations.
@@ -71,6 +72,42 @@ type LockReportResponse struct {
 	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
 	RevisionID     string `json:"revision_id,omitempty"`
 	PipelineURL    string `json:"pipeline_url,omitempty"`
+}
+
+// RunProgressRequest is the request for run.progress operations: one step
+// of a run, sent while the run is going.
+type RunProgressRequest struct {
+	Type      string        `json:"type"`
+	RequestID string        `json:"request_id"`
+	Remote    string        `json:"remote"`
+	Target    RemoteTarget  `json:"target"`
+	Run       ProgressRun   `json:"run"`
+	Event     ProgressEvent `json:"event"`
+}
+
+// ProgressRun names the run the event belongs to.
+type ProgressRun struct {
+	ID        string `json:"id"`
+	StartedAt string `json:"started_at,omitempty"`
+}
+
+// ProgressEvent is a stage, or a collector or tool inside it, starting,
+// finishing, or failing.
+type ProgressEvent struct {
+	At    string `json:"at,omitempty"`
+	Stage string `json:"stage"`
+	Step  string `json:"step,omitempty"`
+	Index int    `json:"index,omitempty"`
+	Total int    `json:"total,omitempty"`
+	State string `json:"state"`
+	Note  string `json:"note,omitempty"`
+}
+
+// RunProgressResponse is the response for run.progress operations.
+type RunProgressResponse struct {
+	OK        bool   `json:"ok"`
+	Type      string `json:"type"`
+	RequestID string `json:"request_id"`
 }
 
 type LockProvenance struct {

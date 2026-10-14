@@ -55,6 +55,7 @@ type CreateReleaseRequest struct {
 	Labels         []string          `json:"labels,omitempty"`
 	BuildContext   map[string]string `json:"build_context,omitempty"`
 	LockProvenance any               `json:"lock_provenance,omitempty"`
+	RunID          string            `json:"run_id,omitempty"`
 }
 
 // CreateLockfileReportRequest is sent to POST /lockfile_reports.
@@ -85,6 +86,33 @@ type LockfileReportResponse struct {
 	LockfileSHA256 string `json:"lockfile_sha256,omitempty"`
 	Status         string `json:"status,omitempty"`
 	PipelineURL    string `json:"pipeline_url,omitempty"`
+}
+
+// CreateRunProgressEventRequest is sent to POST /run_progress_events: one
+// step of a run while it is going.
+type CreateRunProgressEventRequest struct {
+	PipelineID string           `json:"pipeline_id,omitempty"`
+	RunID      string           `json:"run_id"`
+	StartedAt  string           `json:"started_at,omitempty"`
+	Event      RunProgressEvent `json:"event"`
+}
+
+// RunProgressEvent is the step, as epack reported it.
+type RunProgressEvent struct {
+	At    string `json:"at,omitempty"`
+	Stage string `json:"stage"`
+	Step  string `json:"step,omitempty"`
+	Index int    `json:"index,omitempty"`
+	Total int    `json:"total,omitempty"`
+	State string `json:"state"`
+	Note  string `json:"note,omitempty"`
+}
+
+// RunProgressEventResponse is returned from POST /run_progress_events.
+type RunProgressEventResponse struct {
+	Status     string `json:"status,omitempty"`
+	RunID      string `json:"run_id,omitempty"`
+	PipelineID string `json:"pipeline_id,omitempty"`
 }
 
 type CreateFinalizeIntentRequest struct {

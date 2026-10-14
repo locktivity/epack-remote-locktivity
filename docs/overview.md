@@ -9,6 +9,7 @@ The Locktivity remote adapter connects `epack` to the Locktivity registry for ev
 | Push | Creates a pack record, uploads via presigned URL, and finalizes a release |
 | Pull | Resolves and downloads the latest release, or a specific release by ID |
 | Run Sync | Sends run ledger metadata tied to a pack digest |
+| Run Progress | Sends each step of a run as it happens, under the run id the pack later names |
 | Whoami | Returns whether current credentials are authenticated |
 
 ## Request Flow
