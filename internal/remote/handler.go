@@ -439,7 +439,12 @@ func (h *Handler) PushFinalize(req PushFinalizeRequest) (*componentsdk.PushFinal
 		}
 	}
 
+	var links *componentsdk.Links
+	if releaseResp.Links.Pack != "" {
+		links = &componentsdk.Links{Pack: releaseResp.Links.Pack}
+	}
 	return &componentsdk.PushFinalizeResponse{
+		Links: links,
 		Release: componentsdk.ReleaseResult{
 			ReleaseID:  releaseResp.ID,
 			PackDigest: tokenData.PackDigest,

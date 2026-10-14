@@ -111,6 +111,9 @@ type ReleaseResponse struct {
 	ID      string    `json:"id"`
 	Version string    `json:"version,omitempty"`
 	Pack    *PackInfo `json:"pack,omitempty"`
+	Links   struct {
+		Pack string `json:"pack,omitempty"`
+	} `json:"links,omitempty"`
 }
 
 // PackInfo contains pack details in a release response.

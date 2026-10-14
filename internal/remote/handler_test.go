@@ -119,6 +119,10 @@ func TestPushFinalize(t *testing.T) {
 		t.Errorf("expected release ID 'rel_123', got '%s'", resp.Release.ReleaseID)
 	}
 
+	if resp.Links != nil {
+		t.Fatalf("older servers should omit links, got %+v", resp.Links)
+	}
+
 	if len(mockClient.CreateReleaseCalls) != 1 {
 		t.Errorf("expected 1 CreateRelease call, got %d", len(mockClient.CreateReleaseCalls))
 	}
@@ -128,6 +132,32 @@ func TestPushFinalize(t *testing.T) {
 	}
 	if provenance, ok := call.LockProvenance.(*LockProvenance); !ok || provenance.LockfileSHA256 != "lock-sha" {
 		t.Fatalf("expected lock provenance on release request, got %#v", call.LockProvenance)
+	}
+}
+
+func TestPushFinalize_ReturnsPackPageFromServer(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	page := "https://app.locktivity.com/evidence_packs/packs/pack_123"
+	if err := json.Unmarshal([]byte(`{"id":"rel_123","links":{"pack":"`+page+`"}}`), mockClient.CreateReleaseResponse); err != nil {
+		t.Fatal(err)
+	}
+	handler := &Handler{client: mockClient}
+	token, err := handler.encodeSignedToken(PushFinalizeTokenData{
+		FinalizeToken: "fin_123", PackDigest: "sha256:abc123", Nonce: "result-link", ExpiresAt: 4102444800,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := handler.PushFinalize(PushFinalizeRequest{FinalizeToken: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Links == nil || resp.Links.Pack != page {
+		t.Fatalf("links = %+v, want pack %q", resp.Links, page)
+	}
+	wire, err := json.Marshal(resp)
+	if err != nil || !strings.Contains(string(wire), `"links":{"pack":"`+page+`"}`) {
+		t.Fatalf("response = %s, err = %v", wire, err)
 	}
 }
 
