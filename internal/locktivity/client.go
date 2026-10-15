@@ -116,11 +116,16 @@ func releaseName(version string) string {
 		return ""
 	}
 	for _, r := range version {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(".-+_", r)) {
+		if !releaseNameRune(r) {
 			return ""
 		}
 	}
 	return version
+}
+
+// releaseNameRune reports whether r can appear in a release name.
+func releaseNameRune(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(".-+_", r)
 }
 
 // Ensure APIClient implements Client.
