@@ -575,7 +575,7 @@ func TestGetPipelineBundle_UsesPipelinePath(t *testing.T) {
 	})
 
 	client := NewClientWithHTTP(server.Client(), server.URL())
-	resp, err := client.GetPipelineBundle(context.Background(), "northwind-production")
+	resp, err := client.GetPipelineBundle(context.Background(), "northwind-production", "")
 	if err != nil {
 		t.Fatalf("GetPipelineBundle failed: %v", err)
 	}
@@ -789,5 +789,113 @@ func TestRetireSigningKey_PostsToTheKeysRetirement(t *testing.T) {
 	}
 	if resp.Status != "retired" || resp.RetiredAt != "2026-10-07T18:05:00Z" {
 		t.Fatalf("unexpected key: %#v", resp)
+	}
+}
+
+func TestGetPipelineBundle_NamesThePurposeAndReadsRequirements(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodGet,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/bundle",
+		Query:  url.Values{"purpose": {"run"}},
+		Status: http.StatusOK,
+		Body: `{"id":"pipe_1","name":"Northwind production","config_name":"northwind-production","stream":"northwind/production","revision":2,"files":{},"shas":{},
+			"requirements":{"epack":"v0.5.0","hints":[{"name":"SENTRY_AUTH_TOKEN","text":"Add it as a masked CI/CD variable","url":"https://gitlab.com/northwind/compliance/-/settings/ci_cd"}]},
+			"changes":["Collectors added: Sentry"],"changes_since":1}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.GetPipelineBundle(context.Background(), "northwind-production", "run")
+	if err != nil {
+		t.Fatalf("GetPipelineBundle failed: %v", err)
+	}
+	if resp.ChangesSince != 1 || len(resp.Changes) != 1 || resp.Requirements == nil || resp.Requirements.Epack != "v0.5.0" {
+		t.Fatalf("unexpected bundle: %#v", resp)
+	}
+	if len(resp.Requirements.Hints) != 1 || resp.Requirements.Hints[0].Name != "SENTRY_AUTH_TOKEN" || resp.Requirements.Hints[0].URL == "" {
+		t.Fatalf("unexpected hints: %#v", resp.Requirements.Hints)
+	}
+}
+
+func TestCreatePipelineFallback_NamesTheRevisionAndWhatIsMissing(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/fallbacks",
+		Status: http.StatusCreated,
+		Check: func(t *testing.T, r *http.Request, body []byte) {
+			t.Helper()
+			if got := string(body); got != `{"fallback":{"purpose":"run","revision":2,"missing":[{"kind":"variable","name":"SENTRY_AUTH_TOKEN"}]}}` {
+				t.Fatalf("body = %s", got)
+			}
+		},
+		Body: `{"id":"pipe_1","name":"Northwind production","config_name":"northwind-production","stream":"northwind/production","revision":1,"files":{},"shas":{}}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.CreatePipelineFallback(context.Background(), "northwind-production", CreatePipelineFallbackRequest{
+		Purpose:  "run",
+		Revision: 2,
+		Missing:  []MissingRequirement{{Kind: "variable", Name: "SENTRY_AUTH_TOKEN"}},
+	})
+	if err != nil {
+		t.Fatalf("CreatePipelineFallback failed: %v", err)
+	}
+	if resp.Revision != 1 || resp.NoFallback != nil {
+		t.Fatalf("response = %#v, want revision 1", resp)
+	}
+}
+
+func TestCreatePipelineFallback_ReadsWhyNoEarlierRevisionRuns(t *testing.T) {
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodPost,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/fallbacks",
+		Status: http.StatusOK,
+		Body:   `{"no_fallback":{"reason":"No revision before 1 is published."}}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	resp, err := client.CreatePipelineFallback(context.Background(), "northwind-production", CreatePipelineFallbackRequest{Revision: 1})
+	if err != nil {
+		t.Fatalf("CreatePipelineFallback failed: %v", err)
+	}
+	if resp.NoFallback == nil || resp.NoFallback.Reason != "No revision before 1 is published." {
+		t.Fatalf("response = %#v, want the reason", resp)
+	}
+}
+
+func TestRequestsNameTheEpackAndAdapterReleases(t *testing.T) {
+	t.Setenv(EnvWrapperVersion, "0.5.1")
+	previous := AdapterVersion
+	AdapterVersion = "0.3.0"
+	t.Cleanup(func() { AdapterVersion = previous })
+
+	server := contracttest.NewServer(t, contracttest.Step{
+		Method: http.MethodGet,
+		Path:   APIPathPrefix + "/pipelines/northwind-production/bundle",
+		Status: http.StatusOK,
+		Check: func(t *testing.T, r *http.Request, _ []byte) {
+			t.Helper()
+			if r.Header.Get(EpackVersionHeader) != "0.5.1" || r.Header.Get(AdapterVersionHeader) != "0.3.0" {
+				t.Fatalf("version headers = %q, %q", r.Header.Get(EpackVersionHeader), r.Header.Get(AdapterVersionHeader))
+			}
+		},
+		Body: `{"id":"pipe_1","name":"n","config_name":"northwind-production","stream":"s","revision":1,"files":{},"shas":{}}`,
+	})
+
+	client := NewClientWithHTTP(server.Client(), server.URL())
+	if _, err := client.GetPipelineBundle(context.Background(), "northwind-production", ""); err != nil {
+		t.Fatalf("GetPipelineBundle failed: %v", err)
+	}
+}
+
+func TestReleaseName_DropsAnythingAReleaseCannotBe(t *testing.T) {
+	for in, want := range map[string]string{
+		"0.5.1":                 "0.5.1",
+		" v0.5.1+dev ":          "v0.5.1+dev",
+		"0.5.1\nX-Injected: 1":  "",
+		strings.Repeat("9", 65): "",
+	} {
+		if got := releaseName(in); got != want {
+			t.Errorf("releaseName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

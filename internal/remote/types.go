@@ -224,17 +224,59 @@ type ConfigPullRequest struct {
 	Target    map[string]string `json:"target,omitempty"`
 }
 
-// ConfigPullTarget names the config to pull.
+// ConfigPullTarget names the config to pull and why: a run, a check, or a
+// setup clone. Fallback asks for the newest earlier revision that needs none of what the runner lacks instead
+// of the current one.
 type ConfigPullTarget struct {
+	Name     string          `json:"name"`
+	Purpose  string          `json:"purpose,omitempty"`
+	Fallback *ConfigFallback `json:"fallback,omitempty"`
+}
+
+// ConfigFallback says which revision the runner could not run and what it
+// lacks for it, by name.
+type ConfigFallback struct {
+	Revision int           `json:"revision"`
+	Missing  []Requirement `json:"missing"`
+}
+
+// Requirement is one thing a revision needs that a runner lacks: a variable,
+// an approval for a stored secret, a publisher to trust, or an epack release.
+type Requirement struct {
+	Kind string `json:"kind"`
 	Name string `json:"name"`
 }
 
-// ConfigPullResponse carries the files, their shas, and the revision.
+// ConfigRequirements is what Locktivity knows a revision needs beyond its
+// files: the oldest epack that runs it and where this runner adds each
+// variable it reads.
+type ConfigRequirements struct {
+	Epack string            `json:"epack,omitempty"`
+	Hints []RequirementHint `json:"hints,omitempty"`
+}
+
+// RequirementHint says where a runner adds a variable.
+type RequirementHint struct {
+	Name string `json:"name"`
+	Text string `json:"text"`
+	URL  string `json:"url,omitempty"`
+}
+
+// ConfigPullResponse carries the files, their shas, and the revision, or
+// for a fallback that no earlier revision satisfies, why.
 type ConfigPullResponse struct {
-	OK        bool             `json:"ok"`
-	Type      string           `json:"type"`
-	RequestID string           `json:"request_id"`
-	Config    ConfigPullResult `json:"config"`
+	OK         bool             `json:"ok"`
+	Type       string           `json:"type"`
+	RequestID  string           `json:"request_id"`
+	Config     ConfigPullResult `json:"config"`
+	NoFallback *NoFallback      `json:"no_fallback,omitempty"`
+}
+
+// NoFallback says why no earlier revision runs without what the runner
+// lacks: each one needs some of it, or runs something a later revision
+// removed.
+type NoFallback struct {
+	Reason string `json:"reason"`
 }
 
 // ConfigPullResult is one revision of a pipeline's generated files.
@@ -249,6 +291,11 @@ type ConfigPullResult struct {
 	Files    map[string]string `json:"files"`
 	Shas     map[string]string `json:"shas"`
 	Lockfile string            `json:"lockfile,omitempty"`
+	// Changes says in words what changed since ChangesSince, the revision
+	// this runner last ran, when that one is older.
+	Requirements *ConfigRequirements `json:"requirements,omitempty"`
+	Changes      []string            `json:"changes,omitempty"`
+	ChangesSince int                 `json:"changes_since,omitempty"`
 }
 
 // AuthWhoamiRequest is the request for auth.whoami operations.

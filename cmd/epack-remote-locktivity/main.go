@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/locktivity/epack-remote-locktivity/internal/auth"
+	"github.com/locktivity/epack-remote-locktivity/internal/locktivity"
 	"github.com/locktivity/epack-remote-locktivity/internal/remote"
 	"github.com/locktivity/epack/componentsdk"
 )
@@ -39,6 +40,7 @@ func main() {
 }
 
 func run() int {
+	locktivity.AdapterVersion = version
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--capabilities":
@@ -394,12 +396,17 @@ func handleConfigPull(requestID string, data []byte, handler requestHandler) map
 	if err != nil {
 		return remoteErrorResponse(requestID, err)
 	}
-	return map[string]any{
+	answer := map[string]any{
 		"ok":         resp.OK,
 		"type":       resp.Type,
 		"request_id": resp.RequestID,
-		"config":     resp.Config,
 	}
+	if resp.NoFallback != nil {
+		answer["no_fallback"] = resp.NoFallback
+	} else {
+		answer["config"] = resp.Config
+	}
+	return answer
 }
 
 func handleAuthWhoami(requestID string, data []byte, handler requestHandler) map[string]any {

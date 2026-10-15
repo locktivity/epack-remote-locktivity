@@ -17,7 +17,7 @@ func TestRequestsNameTheMachine(t *testing.T) {
 	defer server.Close()
 
 	client := NewClientWithHTTP(server.Client(), server.URL)
-	if _, err := client.GetPipelineBundle(t.Context(), "n"); err != nil {
+	if _, err := client.GetPipelineBundle(t.Context(), "n", ""); err != nil {
 		t.Fatalf("GetPipelineBundle: %v", err)
 	}
 	host, _ := os.Hostname()

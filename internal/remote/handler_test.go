@@ -1471,3 +1471,86 @@ func TestABundleLaidOutByHandNamesItsPipelineThroughTheManifest(t *testing.T) {
 		t.Fatal("a named configuration must win over the manifest")
 	}
 }
+
+func TestConfigPull_NamesItsPurposeAndPassesOnWhatTheRevisionNeeds(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.GetPipelineBundleResponse = &locktivity.PipelineBundleResponse{
+		ID: "pipe_1", Name: "Northwind production", ConfigName: "northwind-production", Revision: 2,
+		Files:        map[string]string{"epack.yaml": "stream: northwind/production\n"},
+		Requirements: &locktivity.BundleRequirements{Epack: "v0.5.0", Hints: []locktivity.BundleRequirementHint{{Name: "SENTRY_AUTH_TOKEN", Text: "Add it as a masked CI/CD variable", URL: "https://gitlab.com/x"}}},
+		Changes:      []string{"Collectors added: Sentry"},
+		ChangesSince: 1,
+	}
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.ConfigPull(ConfigPullRequest{RequestID: "req_1", Config: ConfigPullTarget{Name: "northwind-production", Purpose: "run"}})
+	if err != nil {
+		t.Fatalf("ConfigPull failed: %v", err)
+	}
+	if mockClient.GetPipelineBundlePurposes[0] != "run" {
+		t.Fatalf("purpose = %q, want run", mockClient.GetPipelineBundlePurposes[0])
+	}
+	if resp.Config.ChangesSince != 1 || len(resp.Config.Changes) != 1 || resp.Config.Requirements == nil {
+		t.Fatalf("unexpected config: %#v", resp.Config)
+	}
+	if resp.Config.Requirements.Epack != "v0.5.0" || resp.Config.Requirements.Hints[0].URL != "https://gitlab.com/x" {
+		t.Fatalf("unexpected requirements: %#v", resp.Config.Requirements)
+	}
+}
+
+func TestConfigPull_AFallbackAsksForTheLastRevisionThisRunnerRan(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.CreatePipelineFallbackResponse = &locktivity.PipelineFallbackResponse{PipelineBundleResponse: locktivity.PipelineBundleResponse{ID: "pipe_1", ConfigName: "northwind-production", Revision: 1}}
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.ConfigPull(ConfigPullRequest{RequestID: "req_1", Config: ConfigPullTarget{
+		Name:     "northwind-production",
+		Purpose:  "run",
+		Fallback: &ConfigFallback{Revision: 2, Missing: []Requirement{{Kind: "variable", Name: "SENTRY_AUTH_TOKEN"}}},
+	}})
+	if err != nil {
+		t.Fatalf("ConfigPull failed: %v", err)
+	}
+	if len(mockClient.GetPipelineBundleCalls) != 0 || len(mockClient.CreatePipelineFallbackCalls) != 1 {
+		t.Fatalf("a fallback should ask for the fallback only: bundle %v, fallback %v", mockClient.GetPipelineBundleCalls, mockClient.CreatePipelineFallbackCalls)
+	}
+	call := mockClient.CreatePipelineFallbackCalls[0]
+	if call.Revision != 2 || call.Purpose != "run" || len(call.Missing) != 1 || call.Missing[0].Name != "SENTRY_AUTH_TOKEN" {
+		t.Fatalf("fallback request = %#v", call)
+	}
+	if resp.Config.Revision != 1 {
+		t.Fatalf("revision = %d, want 1", resp.Config.Revision)
+	}
+}
+
+func TestConfigPull_NoEarlierRevisionSaysWhy(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.CreatePipelineFallbackResponse = &locktivity.PipelineFallbackResponse{NoFallback: &locktivity.NoFallback{Reason: "Every revision before 2 needs SENTRY_AUTH_TOKEN, or runs something a later revision removed."}}
+	handler := &Handler{client: mockClient}
+
+	resp, err := handler.ConfigPull(ConfigPullRequest{RequestID: "req_1", Config: ConfigPullTarget{
+		Name:     "northwind-production",
+		Fallback: &ConfigFallback{Revision: 2},
+	}})
+	if err != nil {
+		t.Fatalf("no earlier revision is an answer, not an error: %v", err)
+	}
+	if resp.NoFallback == nil || !strings.Contains(resp.NoFallback.Reason, "before 2") {
+		t.Fatalf("response = %#v, want the remote's reason", resp)
+	}
+}
+
+func TestConfigPull_AFallbackThatIsNotFoundStaysAnError(t *testing.T) {
+	mockClient := locktivity.NewMockClient()
+	mockClient.CreatePipelineFallbackError = errors.New("API error [NOT_FOUND]: Resource not found")
+	handler := &Handler{client: mockClient}
+
+	_, err := handler.ConfigPull(ConfigPullRequest{RequestID: "req_1", Config: ConfigPullTarget{
+		Name:     "northwind-production",
+		Fallback: &ConfigFallback{Revision: 2},
+	}})
+	var remoteErr componentsdk.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr.Code != "not_found" {
+		t.Fatalf("expected not_found, got %v", err)
+	}
+}

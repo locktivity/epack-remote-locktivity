@@ -237,16 +237,60 @@ type TokenResponse struct {
 // PipelineBundleResponse is returned from the pipeline bundle endpoint: the
 // generated files a terminal clones, with the revision they came from.
 type PipelineBundleResponse struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"name"`
-	ConfigName string            `json:"config_name"`
-	Stream     string            `json:"stream"`
-	RunsIn     string            `json:"runs_in,omitempty"`
-	Revision   int               `json:"revision"`
-	Folder     string            `json:"folder,omitempty"`
-	Files      map[string]string `json:"files"`
-	Shas       map[string]string `json:"shas"`
-	Lockfile   string            `json:"lockfile,omitempty"`
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	ConfigName   string              `json:"config_name"`
+	Stream       string              `json:"stream"`
+	RunsIn       string              `json:"runs_in,omitempty"`
+	Revision     int                 `json:"revision"`
+	Folder       string              `json:"folder,omitempty"`
+	Files        map[string]string   `json:"files"`
+	Shas         map[string]string   `json:"shas"`
+	Lockfile     string              `json:"lockfile,omitempty"`
+	Requirements *BundleRequirements `json:"requirements,omitempty"`
+	Changes      []string            `json:"changes,omitempty"`
+	ChangesSince int                 `json:"changes_since,omitempty"`
+}
+
+// BundleRequirements is what a revision needs beyond its files: the oldest
+// epack that runs it and where this runner adds each variable.
+type BundleRequirements struct {
+	Epack string                  `json:"epack,omitempty"`
+	Hints []BundleRequirementHint `json:"hints,omitempty"`
+}
+
+// BundleRequirementHint says where a runner adds one variable.
+type BundleRequirementHint struct {
+	Name string `json:"name"`
+	Text string `json:"text"`
+	URL  string `json:"url,omitempty"`
+}
+
+// CreatePipelineFallbackRequest asks for the newest earlier revision that
+// needs none of what the runner lacks, naming the revision it could not run.
+type CreatePipelineFallbackRequest struct {
+	Purpose  string               `json:"purpose,omitempty"`
+	Revision int                  `json:"revision"`
+	Missing  []MissingRequirement `json:"missing"`
+}
+
+// PipelineFallbackResponse is the fallbacks endpoint's answer: the bundle of
+// an earlier revision, or why no earlier revision runs here.
+type PipelineFallbackResponse struct {
+	PipelineBundleResponse
+	NoFallback *NoFallback `json:"no_fallback,omitempty"`
+}
+
+// NoFallback says why no earlier revision runs without what the runner
+// lacks.
+type NoFallback struct {
+	Reason string `json:"reason"`
+}
+
+// MissingRequirement is one thing a runner lacks, by kind and name.
+type MissingRequirement struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // APIError represents an error response from the API.

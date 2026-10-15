@@ -39,6 +39,8 @@ type MockClient struct {
 	GetIdentityError               error
 	GetPipelineBundleResponse      *PipelineBundleResponse
 	GetPipelineBundleError         error
+	CreatePipelineFallbackResponse *PipelineFallbackResponse
+	CreatePipelineFallbackError    error
 	RegisterSigningKeyResponse     *SigningKeyResponse
 	RegisterSigningKeyError        error
 	ListSigningKeysResponse        *SigningKeysResponse
@@ -71,6 +73,8 @@ type MockClient struct {
 	ResolveCredentialSetsCalls  []ResolveCredentialSetsRequest
 	GetIdentityCalls            int
 	GetPipelineBundleCalls      []string
+	GetPipelineBundlePurposes   []string
+	CreatePipelineFallbackCalls []CreatePipelineFallbackRequest
 	UploadCalls                 []UploadCall
 }
 
@@ -297,12 +301,21 @@ func (m *MockClient) GetIdentity(ctx context.Context) (*IdentityResponse, error)
 	return m.GetIdentityResponse, nil
 }
 
-func (m *MockClient) GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error) {
+func (m *MockClient) GetPipelineBundle(ctx context.Context, name, purpose string) (*PipelineBundleResponse, error) {
 	m.GetPipelineBundleCalls = append(m.GetPipelineBundleCalls, name)
+	m.GetPipelineBundlePurposes = append(m.GetPipelineBundlePurposes, purpose)
 	if m.GetPipelineBundleError != nil {
 		return nil, m.GetPipelineBundleError
 	}
 	return m.GetPipelineBundleResponse, nil
+}
+
+func (m *MockClient) CreatePipelineFallback(ctx context.Context, name string, req CreatePipelineFallbackRequest) (*PipelineFallbackResponse, error) {
+	m.CreatePipelineFallbackCalls = append(m.CreatePipelineFallbackCalls, req)
+	if m.CreatePipelineFallbackError != nil {
+		return nil, m.CreatePipelineFallbackError
+	}
+	return m.CreatePipelineFallbackResponse, nil
 }
 
 func (m *MockClient) UploadToPresignedURL(ctx context.Context, uploadURL string, headers map[string]string, content io.Reader) error {

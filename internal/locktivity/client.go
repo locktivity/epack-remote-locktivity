@@ -46,7 +46,8 @@ type Client interface {
 	GetIdentity(ctx context.Context) (*IdentityResponse, error)
 
 	// Pipeline operations
-	GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error)
+	GetPipelineBundle(ctx context.Context, name, purpose string) (*PipelineBundleResponse, error)
+	CreatePipelineFallback(ctx context.Context, name string, req CreatePipelineFallbackRequest) (*PipelineFallbackResponse, error)
 
 	// Signing key operations, for a signed-in person
 	RegisterSigningKey(ctx context.Context, pipeline string, req RegisterSigningKeyRequest) (*SigningKeyResponse, error)
@@ -60,15 +61,26 @@ type Client interface {
 
 // APIClient implements the Client interface.
 type APIClient struct {
-	httpClient  *http.Client
-	baseURL     string
-	accessToken string
-	machine     string
+	httpClient   *http.Client
+	baseURL      string
+	accessToken  string
+	machine      string
+	epackVersion string
 }
 
 // MachineHeader names the machine the adapter runs on, so Locktivity can say
 // which laptop pulled a configuration or registered a signing key.
 const MachineHeader = "X-Epack-Machine"
+
+// The version headers name the epack and adapter releases a request came
+// from, so Locktivity can show what each runner runs.
+const (
+	EpackVersionHeader   = "X-Epack-Version"
+	AdapterVersionHeader = "X-Epack-Adapter-Version"
+)
+
+// AdapterVersion is this adapter's release, set at startup.
+var AdapterVersion string
 
 const machineNameMaxLength = 64
 
@@ -91,6 +103,26 @@ func machineName() string {
 	return b.String()
 }
 
+// epackVersion is the epack release that started the adapter, as epack
+// passes it to every component it runs.
+func epackVersion() string {
+	return releaseName(os.Getenv(EnvWrapperVersion))
+}
+
+// releaseName keeps a version to what a release name can hold.
+func releaseName(version string) string {
+	version = strings.TrimSpace(version)
+	if len(version) > 64 {
+		return ""
+	}
+	for _, r := range version {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(".-+_", r)) {
+			return ""
+		}
+	}
+	return version
+}
+
 // Ensure APIClient implements Client.
 var _ Client = (*APIClient)(nil)
 
@@ -106,18 +138,20 @@ func NewClient(baseURL, accessToken string) *APIClient {
 			Timeout:   HTTPTimeout,
 			Transport: newHTTPTransport(),
 		},
-		baseURL:     baseURL,
-		accessToken: accessToken,
-		machine:     machineName(),
+		baseURL:      baseURL,
+		accessToken:  accessToken,
+		machine:      machineName(),
+		epackVersion: epackVersion(),
 	}
 }
 
 // NewClientWithHTTP creates a client with a custom HTTP client (for testing).
 func NewClientWithHTTP(httpClient *http.Client, baseURL string) *APIClient {
 	return &APIClient{
-		httpClient: httpClient,
-		baseURL:    strings.TrimSuffix(baseURL, "/"),
-		machine:    machineName(),
+		httpClient:   httpClient,
+		baseURL:      strings.TrimSuffix(baseURL, "/"),
+		machine:      machineName(),
+		epackVersion: epackVersion(),
 	}
 }
 
@@ -362,12 +396,28 @@ func (c *APIClient) GetIdentity(ctx context.Context) (*IdentityResponse, error) 
 	return &resp, nil
 }
 
-// GetPipelineBundle fetches the generated files of a pipeline by its config name or id.
-func (c *APIClient) GetPipelineBundle(ctx context.Context, name string) (*PipelineBundleResponse, error) {
+// GetPipelineBundle fetches the generated files of a pipeline by its config
+// name or id. Purpose says whether a run, a check, or a setup clone asks.
+func (c *APIClient) GetPipelineBundle(ctx context.Context, name, purpose string) (*PipelineBundleResponse, error) {
 	path := fmt.Sprintf("%s/pipelines/%s/bundle", APIPathPrefix, url.PathEscape(name))
+	if purpose != "" {
+		path += "?" + url.Values{"purpose": {purpose}}.Encode()
+	}
 
 	var resp PipelineBundleResponse
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreatePipelineFallback asks for the newest earlier revision this runner
+// can run, since the current one needs what the request names.
+func (c *APIClient) CreatePipelineFallback(ctx context.Context, name string, req CreatePipelineFallbackRequest) (*PipelineFallbackResponse, error) {
+	path := fmt.Sprintf("%s/pipelines/%s/fallbacks", APIPathPrefix, url.PathEscape(name))
+
+	var resp PipelineFallbackResponse
+	if err := c.doJSON(ctx, http.MethodPost, path, map[string]CreatePipelineFallbackRequest{"fallback": req}, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -457,6 +507,12 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", ContentTypeHeader)
 	if c.machine != "" {
 		req.Header.Set(MachineHeader, c.machine)
+	}
+	if c.epackVersion != "" {
+		req.Header.Set(EpackVersionHeader, c.epackVersion)
+	}
+	if version := releaseName(AdapterVersion); version != "" {
+		req.Header.Set(AdapterVersionHeader, version)
 	}
 	if c.accessToken != "" {
 		req.Header.Set(AuthorizationHeader, "Bearer "+c.accessToken)

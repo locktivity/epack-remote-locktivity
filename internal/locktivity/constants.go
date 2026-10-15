@@ -53,6 +53,9 @@ const (
 
 	EnvRemoteEndpoint     = "EPACK_REMOTE_ENDPOINT"
 	EnvRemoteAuthEndpoint = "EPACK_REMOTE_AUTH_ENDPOINT"
+
+	// EnvWrapperVersion is the epack release that started the adapter.
+	EnvWrapperVersion = "EPACK_WRAPPER_VERSION"
 )
 
 // Keychain constants.

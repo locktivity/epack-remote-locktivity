@@ -1287,7 +1287,10 @@ func signingKeyFrom(key locktivity.SigningKeyResponse) SigningKey {
 }
 
 // ConfigPull handles config.pull requests: the generated files of a pipeline,
-// fetched with the stored session or the credentials in the environment.
+// fetched with the stored session or the credentials in the environment. The
+// fetch says why it asks, so a setup clone never counts as a run, and a
+// fallback asks for the newest earlier revision that needs none of what the
+// runner lacks.
 func (h *Handler) ConfigPull(req ConfigPullRequest) (*ConfigPullResponse, error) {
 	name := strings.TrimSpace(req.Config.Name)
 	if name == "" {
@@ -1300,13 +1303,25 @@ func (h *Handler) ConfigPull(req ConfigPullRequest) (*ConfigPullResponse, error)
 		return nil, componentsdk.ErrAuthRequired(err.Error())
 	}
 
-	bundle, err := client.GetPipelineBundle(ctx, name)
-	if err != nil {
-		remoteErr := toRemoteError(err)
-		if remoteErr.Code == "not_found" {
-			remoteErr.Message = fmt.Sprintf("no pipeline named %q that you can run from here. The name is shown on the pipeline page as epack run <name>.", name)
+	var bundle *locktivity.PipelineBundleResponse
+	if fallback := req.Config.Fallback; fallback != nil {
+		answer, err := client.CreatePipelineFallback(ctx, name, locktivity.CreatePipelineFallbackRequest{
+			Purpose:  req.Config.Purpose,
+			Revision: fallback.Revision,
+			Missing:  missingRequirements(fallback.Missing),
+		})
+		if err != nil {
+			return nil, configPullError(name, err)
 		}
-		return nil, remoteErr
+		if answer.NoFallback != nil {
+			return &ConfigPullResponse{OK: true, Type: "config.pull.result", RequestID: req.RequestID, NoFallback: &NoFallback{Reason: answer.NoFallback.Reason}}, nil
+		}
+		bundle = &answer.PipelineBundleResponse
+	} else {
+		bundle, err = client.GetPipelineBundle(ctx, name, req.Config.Purpose)
+		if err != nil {
+			return nil, configPullError(name, err)
+		}
 	}
 
 	return &ConfigPullResponse{
@@ -1314,18 +1329,48 @@ func (h *Handler) ConfigPull(req ConfigPullRequest) (*ConfigPullResponse, error)
 		Type:      "config.pull.result",
 		RequestID: req.RequestID,
 		Config: ConfigPullResult{
-			ID:       bundle.ID,
-			Name:     bundle.ConfigName,
-			Title:    bundle.Name,
-			Stream:   bundle.Stream,
-			RunsIn:   bundle.RunsIn,
-			Revision: bundle.Revision,
-			Folder:   bundle.Folder,
-			Files:    bundle.Files,
-			Shas:     bundle.Shas,
-			Lockfile: bundle.Lockfile,
+			ID:           bundle.ID,
+			Name:         bundle.ConfigName,
+			Title:        bundle.Name,
+			Stream:       bundle.Stream,
+			RunsIn:       bundle.RunsIn,
+			Revision:     bundle.Revision,
+			Folder:       bundle.Folder,
+			Files:        bundle.Files,
+			Shas:         bundle.Shas,
+			Lockfile:     bundle.Lockfile,
+			Requirements: configRequirements(bundle.Requirements),
+			Changes:      bundle.Changes,
+			ChangesSince: bundle.ChangesSince,
 		},
 	}, nil
+}
+
+func configPullError(name string, err error) error {
+	remoteErr := toRemoteError(err)
+	if remoteErr.Code == "not_found" {
+		remoteErr.Message = fmt.Sprintf("no pipeline named %q that you can run from here. The name is shown on the pipeline page as epack run <name>.", name)
+	}
+	return remoteErr
+}
+
+func missingRequirements(missing []Requirement) []locktivity.MissingRequirement {
+	out := make([]locktivity.MissingRequirement, 0, len(missing))
+	for _, m := range missing {
+		out = append(out, locktivity.MissingRequirement{Kind: m.Kind, Name: m.Name})
+	}
+	return out
+}
+
+func configRequirements(requirements *locktivity.BundleRequirements) *ConfigRequirements {
+	if requirements == nil {
+		return nil
+	}
+	out := &ConfigRequirements{Epack: requirements.Epack}
+	for _, hint := range requirements.Hints {
+		out.Hints = append(out.Hints, RequirementHint{Name: hint.Name, Text: hint.Text, URL: hint.URL})
+	}
+	return out
 }
 
 // AuthWhoami handles auth.whoami requests.
